@@ -37,7 +37,8 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
       'Logística': '98',
       'Almacen': '99',
       'Producción Crisoles': '91',
-      'Producción Fundente': '92'
+      'Producción Fundente': '92',
+      'Producción Copelas': '93'
     };
 
   const prefijo = prefijosPorArea[area] || '';

@@ -83,7 +83,7 @@ export const maestroForecastComercial = [
 ];
 
 export const baseDatosUsuarios = {
-  'admin': { nombre: 'Gerencia General', iniciales: 'GG', rol: 'Administrador', areasPermitidas: ['Administración', 'Comercial', 'Producción Crisoles', 'Producción Fundente', 'Calidad', 'Logística', 'Almacen'] }
+  'admin': { nombre: 'Gerencia General', iniciales: 'GG', rol: 'Administrador', areasPermitidas: ['Administración', 'Comercial', 'Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Calidad', 'Logística', 'Almacen'] }
 };
 
 export const datosAreas = {

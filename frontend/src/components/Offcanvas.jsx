@@ -8,6 +8,8 @@ import UtilesOficinaForm from './modulos/UtilesOficinaForm';
 import ForecastComercialForm from './modulos/ForecastComercialForm';
 import CosteoCrisolesForm from './modulos/CosteoCrisolesForm';
 import CosteoFundenteForm from './modulos/CosteoFundenteForm';
+import CosteoCopelasForm from './modulos/CosteoCopelasForm';
+import CosteoEmbalajesForm from './modulos/CosteoEmbalajesForm';
 import BaseRegistroForm from './common/BaseRegistroForm';
 import { MODULOS_CONFIG } from '../config/modulosConfig';
 import { guardarRegistro } from '../data/store';
@@ -22,7 +24,7 @@ import { guardarRegistro } from '../data/store';
 export default function Offcanvas(props) {
   const { isOpen, onClose, categoria, idVersion, area, registroParaVer, modo, onGuardado } = props;
 
-  const modulosComoVentana = ['Remuneraciones', 'Forecast de Ventas', 'Costeo de Crisoles', 'Costeo de Fundente', 'Plan de Mantenimiento', 'Plan de Viaje', 'Utiles de Oficina', 'Plan de Depreciación'  ];
+  const modulosComoVentana = ['Remuneraciones', 'Forecast de Ventas', 'Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas', 'Costeo de Embalajes', 'Plan de Mantenimiento', 'Plan de Viaje', 'Utiles de Oficina', 'Plan de Depreciación'  ];
   const esVentana = modulosComoVentana.includes(categoria);
 
   if (!isOpen) return null;
@@ -149,6 +151,31 @@ export default function Offcanvas(props) {
       case 'Costeo de Fundente':
         return (
           <CosteoFundenteForm
+            registro={registroParaVer}
+            onGuardar={handleGuardar}
+            onCancelar={onClose}
+            modo={modo}
+            idVersion={idVersion}
+            area={area}
+          />
+        );
+
+      case 'Costeo de Copelas':
+        return (
+          <CosteoCopelasForm
+            registro={registroParaVer}
+            onGuardar={handleGuardar}
+            onCancelar={onClose}
+            modo={modo}
+            idVersion={idVersion}
+            area={area}
+          />
+        );
+
+      // Logística costea el embalaje (prefijo 98); los costeos de producción solo lo leen.
+      case 'Costeo de Embalajes':
+        return (
+          <CosteoEmbalajesForm
             registro={registroParaVer}
             onGuardar={handleGuardar}
             onCancelar={onClose}

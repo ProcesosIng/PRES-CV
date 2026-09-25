@@ -43,19 +43,24 @@ const MODULOS_PLAN_COMP = [
   'Utiles de Oficina',
 ];
 
-// Costeo de Crisoles / Fundente son exclusivos de sus áreas de producción:
+// Costeo de Crisoles / Fundente / Copelas son exclusivos de sus áreas de producción:
 // leen el forecast de Comercial y los totales por proceso de los módulos
 // "normales" de esa misma área (ver store.js → obtenerTotalesPorProceso),
 // y alimentan Materias Primas / MA y Suministros / Envases y Embalajes.
 const MODULOS_COSTEO_CRISOLES = ['Costeo de Crisoles'];
 const MODULOS_COSTEO_FUNDENTE = ['Costeo de Fundente'];
+const MODULOS_COSTEO_COPELAS = ['Costeo de Copelas'];
+
+// El embalaje lo costea Logística (prefijo 98); Crisoles/Fundente/Copelas solo lo leen.
+const MODULOS_COSTEO_EMBALAJES = ['Costeo de Embalajes'];
 
 export const MODULOS_POR_AREA = {
   'Administración': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
-  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
-  'Producción Crisoles': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_CRISOLES, ...MODULOS_PLANIFICACION, ...BASE_COMUN, ...MODULOS_PLAN_COMP, 'Costeo de Embalajes'],
+  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP, ...MODULOS_COSTEO_EMBALAJES],
+  'Producción Crisoles': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_CRISOLES, ...MODULOS_PLANIFICACION, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Almacen': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Producción Fundente': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_FUNDENTE, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
+  'Producción Copelas': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_COPELAS, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Calidad': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Comercial': [...BASE_COMUN, ...MODULOS_PLAN_COMP, 'Forecast de Ventas'],
 };
