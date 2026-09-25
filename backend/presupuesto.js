@@ -13,6 +13,10 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const { types } = require('pg');
+
+// Las columnas DATE se devuelven tal cual ('2026-01-01'), sin convertir a Date con zona horaria.
+types.setTypeParser(1082, (v) => v);
 
 const CAMPOS_META = ['rev', 'creado_por', 'creado_en', 'actualizado_por', 'actualizado_en', 'eliminado', 'eliminado_por', 'eliminado_en', 'idVersion'];
 
@@ -36,6 +40,77 @@ const ipDe = (req) => req.headers['x-forwarded-for']?.split(',')[0].trim() || re
 
 const esDerivado = (r) => r?.detalle_columnas?.es_derivado === true || String(r?.id_registro || '').startsWith('DERIV-');
 
+const num = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Solo acepta fechas AAAA-MM-DD (o que empiecen así); lo demás queda en null.
+function fechaValida(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return { fecha: null, anio: null, mes: null };
+  return { fecha: `${m[1]}-${m[2]}-${m[3]}`, anio: parseInt(m[1], 10), mes: parseInt(m[2], 10) };
+}
+
+// gasto = lo que va al reporte de gastos; costeo y forecast son formularios de apoyo / ventas.
+function tipoRegistro(modulo) {
+  const m = String(modulo || '').toLowerCase();
+  if (m.startsWith('costeo de')) return 'costeo';
+  if (m.startsWith('forecast')) return 'forecast';
+  return 'gasto';
+}
+
+// "916121000 - Materias primas - Materias primas" -> { codigo: '916121000', nombre: 'Materias primas - Materias primas' }
+function separarCuenta(texto) {
+  const t = String(texto || '').trim();
+  const m = t.match(/^(\d+)\s*(?:-\s*)?(.*)$/);
+  if (!m) return { codigo: null, nombre: t || null };
+  return { codigo: m[1], nombre: m[2].trim() || null };
+}
+
+// Columnas comunes de la cabecera, tomadas del registro tal como lo arma cada formulario.
+function camposCabecera(r) {
+  const dc = r.detalle_columnas || {};
+  const { fecha, anio, mes } = fechaValida(r.fecha_proyeccion);
+  return {
+    tipo: tipoRegistro(r.modulo),
+    fecha, anio, mes,
+    detalle: dc.detalle || dc.viaje || dc.concepto || null,
+    nombre: dc.producto || r.empleado_nombre || null,
+    monto: num(r.totales?.costo_total ?? dc.costo_total ?? dc.costo_total_anual),
+  };
+}
+
+// Líneas contables del registro: una por cada cuenta del desglose (o la cuenta afectada si no hay desglose).
+function lineasDe(r, cab) {
+  const dc = r.detalle_columnas || {};
+  const desglose = Array.isArray(r.desglose_contable) ? r.desglose_contable.filter(d => d && (d.cuenta || d.monto)) : [];
+  const base = desglose.length > 0
+    ? desglose.map(d => ({ cuenta: d.cuenta, monto: num(d.monto), detalle: d.detalle || cab.detalle }))
+    : (dc.cuenta_afectada || dc.numero_cuenta) ? [{ cuenta: dc.cuenta_afectada || dc.numero_cuenta, monto: cab.monto, detalle: cab.detalle }] : [];
+  return base
+    .filter(l => l.monto !== 0 || l.cuenta)
+    .map(l => ({ ...separarCuenta(l.cuenta), monto: l.monto, detalle: l.detalle || null }));
+}
+
+async function guardarLineas(cx, r, cab) {
+  await cx.query('DELETE FROM ppto_registro_lineas WHERE id_registro = $1', [r.id_registro]);
+  const lineas = lineasDe(r, cab);
+  if (lineas.length === 0) return;
+  const valores = [];
+  const params = [];
+  lineas.forEach((l, i) => {
+    const b = i * 12;
+    valores.push(`(${Array.from({ length: 12 }, (_, k) => `$${b + k + 1}`).join(',')})`);
+    params.push(r.id_registro, r.id_version, r.area, r.modulo, cab.tipo, cab.fecha, cab.anio, cab.mes, l.codigo, l.nombre, l.detalle, l.monto);
+  });
+  await cx.query(
+    `INSERT INTO ppto_registro_lineas (id_registro, id_version, area, modulo, tipo_registro, fecha, anio, mes, cuenta_codigo, cuenta_nombre, detalle, monto)
+     VALUES ${valores.join(',')}`,
+    params
+  );
+}
+
 function limpiarDatos(r) {
   const datos = { ...r };
   CAMPOS_META.forEach(c => delete datos[c]);
@@ -50,7 +125,7 @@ function filaARegistro(f) {
     area: f.area,
     modulo: f.modulo,
     id_lote: f.id_lote,
-    fecha_proyeccion: f.fecha_proyeccion,
+    fecha_proyeccion: f.datos?.fecha_proyeccion ?? f.fecha_proyeccion,
     rev: f.rev,
     creado_por: f.creado_por,
     creado_en: f.creado_en,
@@ -119,12 +194,15 @@ async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAudito
   const derivado = esDerivado(r);
   const actual = await cx.query('SELECT * FROM ppto_registros WHERE id_registro = $1 FOR UPDATE', [r.id_registro]);
 
+  const cab = camposCabecera(r);
+
   if (actual.rowCount === 0) {
     const ins = await cx.query(
-      `INSERT INTO ppto_registros (id_registro, id_version, area, modulo, id_lote, fecha_proyeccion, es_derivado, datos, creado_por, actualizado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING *`,
-      [r.id_registro, r.id_version, r.area, r.modulo, r.id_lote || null, r.fecha_proyeccion || null, derivado, JSON.stringify(datos), ctx.usuario]
+      `INSERT INTO ppto_registros (id_registro, id_version, area, modulo, tipo_registro, id_lote, fecha_proyeccion, anio, mes, detalle, nombre_referencia, monto_total, es_derivado, datos, creado_por, actualizado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`,
+      [r.id_registro, r.id_version, r.area, r.modulo, cab.tipo, r.id_lote || null, cab.fecha, cab.anio, cab.mes, cab.detalle, cab.nombre, cab.monto, derivado, JSON.stringify(datos), ctx.usuario]
     );
+    await guardarLineas(cx, r, cab);
     if (conAuditoria && !derivado) {
       await auditar(cx, { ...ctx, accion: 'CREAR', tabla: 'ppto_registros', id_objeto: r.id_registro, id_version: r.id_version, area: r.area, modulo: r.modulo, despues: datos });
     }
@@ -139,12 +217,14 @@ async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAudito
 
   const upd = await cx.query(
     `UPDATE ppto_registros
-        SET id_version = $2, area = $3, modulo = $4, id_lote = $5, fecha_proyeccion = $6, es_derivado = $7, datos = $8,
-            rev = rev + 1, actualizado_por = $9, actualizado_en = now(),
+        SET id_version = $2, area = $3, modulo = $4, tipo_registro = $5, id_lote = $6, fecha_proyeccion = $7, anio = $8, mes = $9,
+            detalle = $10, nombre_referencia = $11, monto_total = $12, es_derivado = $13, datos = $14,
+            rev = rev + 1, actualizado_por = $15, actualizado_en = now(),
             eliminado = false, eliminado_por = NULL, eliminado_en = NULL
       WHERE id_registro = $1 RETURNING *`,
-    [r.id_registro, r.id_version, r.area, r.modulo, r.id_lote || null, r.fecha_proyeccion || null, derivado, JSON.stringify(datos), ctx.usuario]
+    [r.id_registro, r.id_version, r.area, r.modulo, cab.tipo, r.id_lote || null, cab.fecha, cab.anio, cab.mes, cab.detalle, cab.nombre, cab.monto, derivado, JSON.stringify(datos), ctx.usuario]
   );
+  await guardarLineas(cx, r, cab);
   if (conAuditoria && !derivado) {
     await auditar(cx, { ...ctx, accion: previo.eliminado ? 'RESTAURAR' : 'ACTUALIZAR', tabla: 'ppto_registros', id_objeto: r.id_registro,
       id_version: r.id_version, area: r.area, modulo: r.modulo, antes: previo.datos, despues: datos });
