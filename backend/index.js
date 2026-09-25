@@ -740,6 +740,35 @@ app.get('/api/maestros/productos/historial', async (req, res) => {
   res.json({ ventas, compras, salidas, costoPromedio });
 });
 // ----------------------------------------------------
+// EJECUTADO PARA EL ESTADO DE RESULTADOS (Odoo, asientos publicados)
+// Saldo (debe - haber) por cuenta y mes de las clases 6, 7, 8 y 9 del año pedido.
+// La clasificación en líneas del EERR se hace en el frontend (config/eerr.js).
+// ----------------------------------------------------
+app.get('/api/eerr/ejecutado', async (req, res) => {
+  const anio = parseInt(req.query.anio, 10);
+  if (!anio || anio < 2000 || anio > 2100) return res.status(400).json({ error: 'Indique un año válido' });
+  try {
+    const resultado = await dbCorp.query(
+      `SELECT aa.code AS codigo,
+              EXTRACT(MONTH FROM aml.date)::int AS mes,
+              SUM(aml.debit - aml.credit) AS saldo
+         FROM public.account_move_line aml
+         JOIN public.account_move am ON am.id = aml.move_id
+         JOIN public.account_account aa ON aa.id = aml.account_id
+        WHERE am.state = 'posted'
+          AND aml.date >= $1::date AND aml.date < $2::date
+          AND (aa.code LIKE '6%' OR aa.code LIKE '7%' OR aa.code LIKE '8%' OR aa.code LIKE '9%')
+        GROUP BY aa.code, EXTRACT(MONTH FROM aml.date)`,
+      [`${anio}-01-01`, `${anio + 1}-01-01`]
+    );
+    res.json(resultado.rows.map(f => ({ codigo: String(f.codigo), mes: f.mes, saldo: parseFloat(f.saldo) || 0 })));
+  } catch (error) {
+    console.error('Error obteniendo el ejecutado del EERR:', error.message);
+    res.status(500).json({ error: 'No se pudo leer el ejecutado desde Odoo', detalle: error.message });
+  }
+});
+
+// ----------------------------------------------------
 // RUTAS DE FORECASTS / REGISTROS (BD Propia)
 // ----------------------------------------------------
 

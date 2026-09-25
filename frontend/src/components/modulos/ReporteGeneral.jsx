@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import ReporteGantt, { MESES_CORTOS, mesesVacios, totalMontoGrupos } from './ReporteGantt';
+import EstadoResultados from './EstadoResultados';
 import { listarVersiones } from '../../data/store';
 
 // El Forecast (ventas) y los Costeos (formularios de apoyo que calculan el costo de cada
@@ -48,49 +49,26 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     }
   }, []);
 
-  const modulosDisponibles = useMemo(() => {
-    const modulos = registrosTotales
-      .map(r => r.modulo)
-      .filter(Boolean)
-      .filter(m => !PESTANAS_SOLO_GASTOS.includes(tipoReporte) || !esForecastOCosteo(m));
-    return [...new Set(modulos)].sort();
-  }, [registrosTotales, tipoReporte]);
-
-  const areasDisponibles = useMemo(() => {
-    const areas = registrosTotales.map(r => r.area || r.detalle_columnas?.area).filter(Boolean);
-    return [...new Set(areas)].sort();
-  }, [registrosTotales]);
-
-  const clientesDisponibles = useMemo(() => {
-    const clientes = registrosTotales.map(r => r.detalle_columnas?.cliente).filter(Boolean);
-    return [...new Set(clientes)].sort();
-  }, [registrosTotales]);
-
-  const vendedoresDisponibles = useMemo(() => {
-    const vendedores = registrosTotales.map(r => r.detalle_columnas?.vendedor).filter(Boolean);
-    return [...new Set(vendedores)].sort();
-  }, [registrosTotales]);
-
-  // Registros Filtrados y Ordenados de forma Segura
-  const registrosFiltrados = useMemo(() => {
-    const filtrados = registrosTotales.filter(reg => {
+  // ¿El registro pasa los filtros de la pestaña actual? `omitir` deja fuera un filtro:
+  // así cada lista de opciones solo ofrece valores que TIENEN datos con los demás filtros.
+  const cumpleFiltros = (reg, omitir = null) => {
       const dc = reg.detalle_columnas || {};
 
       if (PESTANAS_SOLO_GASTOS.includes(tipoReporte) && esForecastOCosteo(reg.modulo)) return false;
 
-      if (filtroVersion && reg.id_version !== filtroVersion) return false;
+      if (omitir !== 'version' && filtroVersion && reg.id_version !== filtroVersion) return false;
       // Cada filtro solo aplica en las pestañas donde se muestra.
       const usaModuloArea = ['general', 'gastos_areas', 'compras'].includes(tipoReporte);
-      if (usaModuloArea && filtroModulo && reg.modulo !== filtroModulo) return false;
+      if (omitir !== 'modulo' && usaModuloArea && filtroModulo && reg.modulo !== filtroModulo) return false;
 
       const areaReg = reg.area || dc.area || '';
-      if (usaModuloArea && filtroArea && areaReg !== filtroArea) return false;
+      if (omitir !== 'area' && usaModuloArea && filtroArea && areaReg !== filtroArea) return false;
 
       if (tipoReporte === 'forecast') {
-        if (filtroCliente && (dc.cliente || '') !== filtroCliente) return false;
-        if (filtroVendedor && (dc.vendedor || '') !== filtroVendedor) return false;
-        if (filtroMoneda && (dc.moneda || '') !== filtroMoneda) return false;
-        if (filtroUnidadNegocio && (dc.unidad_negocio || '') !== filtroUnidadNegocio) return false;
+        if (omitir !== 'cliente' && filtroCliente && (dc.cliente || '') !== filtroCliente) return false;
+        if (omitir !== 'vendedor' && filtroVendedor && (dc.vendedor || '') !== filtroVendedor) return false;
+        if (omitir !== 'moneda' && filtroMoneda && (dc.moneda || '') !== filtroMoneda) return false;
+        if (omitir !== 'unidad' && filtroUnidadNegocio && (dc.unidad_negocio || '') !== filtroUnidadNegocio) return false;
       }
 
       // Si estamos en Forecast o Compras, omitimos este filtro global de texto porque se procesa de forma específica en su propio useMemo
@@ -117,7 +95,11 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       }
 
       return true;
-    });
+  };
+
+  // Registros Filtrados y Ordenados de forma Segura
+  const registrosFiltrados = useMemo(() => {
+    const filtrados = registrosTotales.filter(reg => cumpleFiltros(reg));
 
     return filtrados.sort((a, b) => {
       let valA = a[ordenGeneral.columna];
@@ -137,6 +119,24 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       return 0;
     });
   }, [registrosTotales, filtroVersion, filtroModulo, filtroArea, filtroPersona, fechaDesde, fechaHasta, filtroCliente, filtroVendedor, filtroMoneda, filtroUnidadNegocio, ordenGeneral, tipoReporte]);
+
+  // Opciones de cada filtro: solo valores con datos, considerando los DEMÁS filtros activos.
+  const opcionesDe = (omitir, extraer, soloForecast = false) => {
+    const set = new Set();
+    registrosTotales.forEach(reg => {
+      if (soloForecast && reg.modulo !== 'Forecast de Ventas') return;
+      if (!cumpleFiltros(reg, omitir)) return;
+      const v = extraer(reg);
+      if (v) set.add(v);
+    });
+    return [...set].sort();
+  };
+
+  const depsFiltros = [registrosTotales, tipoReporte, filtroVersion, filtroModulo, filtroArea, filtroCliente, filtroVendedor, filtroMoneda, filtroUnidadNegocio, filtroPersona, fechaDesde, fechaHasta];
+  const modulosDisponibles = useMemo(() => opcionesDe('modulo', r => r.modulo), depsFiltros);
+  const areasDisponibles = useMemo(() => opcionesDe('area', r => r.area || r.detalle_columnas?.area), depsFiltros);
+  const clientesDisponibles = useMemo(() => opcionesDe('cliente', r => r.detalle_columnas?.cliente, true), depsFiltros);
+  const vendedoresDisponibles = useMemo(() => opcionesDe('vendedor', r => r.detalle_columnas?.vendedor, true), depsFiltros);
 
   // Agrupación dinámica para el Reporte General
   const resumenGeneralAgrupado = useMemo(() => {
@@ -378,13 +378,9 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
 
   const anioActivoGantt = aniosGantt.includes(anioGantt) ? anioGantt : (aniosGantt[0] || '');
 
-  const unidadesNegocioDisponibles = useMemo(() => Array.from(new Set(
-    registrosTotales.filter(r => r.modulo === 'Forecast de Ventas').map(r => r.detalle_columnas?.unidad_negocio).filter(Boolean)
-  )).sort(), [registrosTotales]);
+  const unidadesNegocioDisponibles = useMemo(() => opcionesDe('unidad', r => r.detalle_columnas?.unidad_negocio, true), depsFiltros);
 
-  const centrosProduccionDisponibles = useMemo(() => Array.from(new Set(
-    registrosTotales.filter(r => esCosteoProduccion(r.modulo)).map(r => r.area).filter(Boolean)
-  )).sort(), [registrosTotales]);
+  const centrosProduccionDisponibles = useMemo(() => opcionesDe(null, r => (esCosteoProduccion(r.modulo) ? r.area : null)), depsFiltros);
 
   const agruparEnGrupos = (mapaGrupos) => Object.values(mapaGrupos)
     .map(g => ({ ...g, filas: Object.values(g.filas).sort((a, b) => a.titulo.localeCompare(b.titulo)) }))
@@ -611,10 +607,13 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
         </div>
         
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {tipoReporte !== 'eerr' && (
           <button onClick={exportarAExcel} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
             📥 Descargar CSV / Excel
           </button>
+          )}
           
+          {tipoReporte !== 'eerr' && (
           <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
             <div style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>
               {{ forecast: 'INGRESO PROYECTADO (US$ convertido a S/)', compras: 'COSTO DE COMPRAS', produccion: 'COSTO DE PRODUCCIÓN' }[tipoReporte] || 'TOTAL FILTRADO'}
@@ -623,6 +622,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
               S/ {granTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
+          )}
         </div>
       </div>
 
@@ -632,7 +632,8 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           { id: 'forecast', label: '📈 Forecast de Ventas' },
           { id: 'gastos_areas', label: '🏢 Gastos por Áreas' },
           { id: 'compras', label: '🛒 Plan de Compras' },
-          { id: 'produccion', label: '⚙️ Plan de Producción' }
+          { id: 'produccion', label: '⚙️ Plan de Producción' },
+          { id: 'eerr', label: '📊 Estado de Resultados' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -938,6 +939,10 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       )}
 
       {/* 5. REPORTE GENERAL CONSOLIDADO (CON VISTA AGRUPADA Y DETALLADA) */}
+      {tipoReporte === 'eerr' && (
+        <EstadoResultados registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
+      )}
+
       {tipoReporte === 'general' && (
         <div style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
           
