@@ -7,9 +7,13 @@ import '../../index.css';
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = Array.from({ length: 5 }, (_, i) => (ANIO_ACTUAL - 1 + i).toString());
 const MODULOS_EXCLUIDOS_DESTINO = ['Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas', 'Costeo de Embalajes', 'Forecast de Ventas'];
-const MODULOS_DESTINO_DISPONIBLES = Object.keys(configModulos || {}).filter(m => !MODULOS_EXCLUIDOS_DESTINO.includes(m));
+// Los insumos del costeo solo pueden ir a los módulos de producción.
+const MODULOS_DESTINO_DISPONIBLES = ['Materias Primas', 'Materiales Auxiliares y Suministros', 'Envases y Embalajes'];
 const CUENTA_MATERIA_PRIMA = '6121000 - Materias primas - Materias primas';
 const CUENTA_ENVASES = '6141000 - Envases y embalajes - Envases';
+// Cuenta FIJA según el módulo destino (no se asigna manualmente):
+// envases -> 6141000; materias primas e insumos -> 6121000. Luego se antepone el prefijo del área.
+const cuentaSegunModulo = (modulo) => (modulo === 'Envases y Embalajes' ? CUENTA_ENVASES : CUENTA_MATERIA_PRIMA);
 
 // ==========================================
 // HELPERS
@@ -857,10 +861,10 @@ export default function CosteoCopelasForm({ registro, onGuardar, onCancelar, mod
       const desgloseProdContable = [];
 
       // Registros derivados mes a mes (materias primas y envases) a partir del mismo motor de cálculo
-      const derivar = (detalleLista, tag, moduloPorDefecto, cuentaBase) => {
+      const derivar = (detalleLista, tag, moduloPorDefecto) => {
         detalleLista.forEach((d, idx) => {
-          const cuentaConPrefijo = formatearCuentaConPrefijo93(cuentaBase);
           const moduloDestino = d.moduloDestino || moduloPorDefecto;
+          const cuentaConPrefijo = formatearCuentaConPrefijo93(cuentaSegunModulo(moduloDestino));
 
           d.meses.forEach(({ mes, iM, consumo, costo }) => {
             if (!(costo > 0 || consumo > 0)) return;
@@ -896,8 +900,8 @@ export default function CosteoCopelasForm({ registro, onGuardar, onCancelar, mod
         });
       };
 
-      derivar(fila.detMat, 'MAT', 'Materias Primas', CUENTA_MATERIA_PRIMA);
-      derivar(fila.detSum, 'SUM', 'Envases y Embalajes', CUENTA_ENVASES);
+      derivar(fila.detMat, 'MAT', 'Materias Primas');
+      derivar(fila.detSum, 'SUM', 'Envases y Embalajes');
 
       // Desglose contable de mano de obra (por etapa) y CIF
       const agregarModulos = (lista, montos, etiqueta) => {
@@ -1205,7 +1209,7 @@ export default function CosteoCopelasForm({ registro, onGuardar, onCancelar, mod
                           </select>
                           <input type="number" step="0.0001" value={item.valor} onChange={e => actMat(item.id, 'valor', e.target.value)} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px' }} />
                           <input type="number" step="0.01" value={item.costoUnitario} onChange={e => actMat(item.id, 'costoUnitario', e.target.value)} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px' }} />
-                          <input type="text" value={item.cuenta || ''} readOnly placeholder="(fija: 6121000)" style={{ padding: '6px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '10px', background: '#f8fafc', color: '#94a3b8' }} title="La cuenta de materia prima es fija: 6121000" />
+                          <input type="text" value={item.cuenta || ''} readOnly placeholder={`(fija: ${formatearCuentaConPrefijo93('6121000')})`} style={{ padding: '6px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '10px', background: '#f8fafc', color: '#94a3b8' }} title="La cuenta de materias primas e insumos es fija: 6121000 con el prefijo del área" />
                           <div style={{ background: '#f8fafc', padding: '4px 6px', borderRadius: '4px', textAlign: 'right', border: '1px solid #e2e8f0' }}>
                             <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#0f172a', display: 'block' }}>{consumoTotal.toLocaleString('en-US', { maximumFractionDigits: 1 })} {item.udm}</span>
                             <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#166534', display: 'block' }}>S/ {costoTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
@@ -1311,52 +1315,9 @@ export default function CosteoCopelasForm({ registro, onGuardar, onCancelar, mod
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#fffbeb', padding: '6px', borderRadius: '4px', border: '1px solid #fde68a', marginBottom: '8px' }}>
-                    {/* BUSCADOR FLOTANTE DE CUENTA CONTABLE P2 */}
-                    <div data-dropdown-cuenta={`p2-${item.id}`} style={{ position: 'relative', flex: 1 }}>
-                      <input 
-                        type="text" 
-                        placeholder="Cuenta Contable (Ej: 6021000)"
-                        value={item.cuenta || ''} 
-                        onChange={e => {
-                          actSum(item.id, 'cuenta', e.target.value);
-                          setFilaCuentaAbierta(`p2-${item.id}`);
-                        }} 
-                        onFocus={() => setFilaCuentaAbierta(`p2-${item.id}`)}
-                        autoComplete="off"
-                        style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', background: 'white' }} 
-                      />
-                      
-                      {filaCuentaAbierta === `p2-${item.id}` && (
-                        <div style={{
-                          position: 'absolute', top: '100%', left: 0, right: 0, background: 'white',
-                          border: '1px solid #cbd5e1', borderRadius: '0 0 6px 6px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-                          maxHeight: '220px', overflowY: 'auto', zIndex: 50, marginTop: '2px'
-                        }}>
-                          {obtenerCuentasFiltradas(cuentasBD, item.cuenta).map((c, idx) => (
-                            <div
-                              key={`cta-p2-${item.id}-${idx}`}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                const cuentaCompleta = c.codigo ? `${c.codigo} - ${c.nombre}` : c.nombre;
-                                actSum(item.id, 'cuenta', cuentaCompleta);
-                                setFilaCuentaAbierta(null);
-                              }}
-                              style={{ 
-                                padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', color: '#1e293b', 
-                                display: 'flex', flexDirection: 'column', gap: '4px' 
-                              }}
-                              onMouseEnter={(ev) => ev.currentTarget.style.background = '#f8fafc'}
-                              onMouseLeave={(ev) => ev.currentTarget.style.background = 'white'}
-                            >
-                              <span style={{ fontSize: '11px', fontWeight: 600 }}>{c.nombre}</span>
-                              <span style={{ fontSize: '9px', color: '#64748b' }}>Cód: {c.codigo || '-'} | {c.tipo || ''}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <select value={item.moduloDestino} onChange={e => actSum(item.id, 'moduloDestino', e.target.value)} style={{ padding: '4px', fontSize: '11px' }}>
-                      <option value="">-- Módulo Destino --</option>
+                    {/* CUENTA FIJA según el módulo destino (no se asigna manualmente) */}
+                    <input type="text" readOnly value={formatearCuentaConPrefijo93(cuentaSegunModulo(item.moduloDestino || 'Envases y Embalajes'))} title="Cuenta fija: envases -> 6141000, materias primas e insumos -> 6121000 (con el prefijo del área)" style={{ width: '100%', padding: '6px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px', background: '#f8fafc', color: '#475569' }} />
+                    <select value={item.moduloDestino || 'Envases y Embalajes'} onChange={e => actSum(item.id, 'moduloDestino', e.target.value)} style={{ padding: '4px', fontSize: '11px' }}>
                       {MODULOS_DESTINO_DISPONIBLES.map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>

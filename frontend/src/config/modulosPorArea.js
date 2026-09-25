@@ -56,7 +56,8 @@ const MODULOS_COSTEO_EMBALAJES = ['Costeo de Embalajes'];
 
 export const MODULOS_POR_AREA = {
   'Administración': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
-  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP, ...MODULOS_COSTEO_EMBALAJES],
+  // 'Envases y Embalajes' recibe los registros que genera el Costeo de Embalajes (cuenta 986142000).
+  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP, ...MODULOS_COSTEO_EMBALAJES, 'Envases y Embalajes'],
   'Producción Crisoles': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_CRISOLES, ...MODULOS_PLANIFICACION, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Almacen': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Producción Fundente': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_FUNDENTE, ...BASE_COMUN, ...MODULOS_PLAN_COMP],

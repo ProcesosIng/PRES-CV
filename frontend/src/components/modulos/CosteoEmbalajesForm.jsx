@@ -5,11 +5,11 @@ import { listarLineasForecastParaEmbalaje, guardarRegistrosLote, obtenerProducto
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = Array.from({ length: 5 }, (_, i) => (ANIO_ACTUAL - 1 + i).toString());
 
-// Cuenta de embalaje con prefijo 98 (Logística): conserva los últimos 7 dígitos del código base.
-const formatearCuentaConPrefijo98 = (codigoBase, descripcion) => {
-  const base = String(codigoBase || '6142000').replace(/\D/g, '').slice(-7);
-  return `98${base} - ${descripcion || 'Envases y Embalajes - Embalajes'}`;
-};
+// El embalaje SIEMPRE va a la cuenta 6142000 (Envases y embalajes - Embalajes) del área de
+// Logística, con su prefijo 98: 986142000. No se asigna manualmente.
+const CUENTA_EMBALAJE_LOGISTICA = '986142000 - Envases y embalajes - Embalajes';
+const MODULO_DESTINO_EMBALAJE = 'Envases y Embalajes';
+const AREA_LOGISTICA = 'Logística';
 
 const obtenerFactorPorUnidad = (unidadMedida) => {
   if (!unidadMedida) return 1;
@@ -151,22 +151,60 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
     const areaDestino = LINEAS_PRODUCCION_EMBALAJE.find(l => l.unidadNegocio === lineaSel)?.area || '';
     const idLoteBase = `LOTE-EMB-${idVersion}-${lineaSel}-${anioSel}`;
 
-    const registrosAGuardar = calculoPorLinea.map((linea, idx) => {
+    const registrosAGuardar = [];
+
+    calculoPorLinea.forEach((linea) => {
       const idRegistro = `EMB-${linea.id_registro}`; // 1 registro de embalaje por línea de forecast
       const desglose = linea.detalleInsumos
         .filter(d => d.costo > 0)
         .map((d, i) => ({
           id: `emb-${i}`,
-          cuenta: formatearCuentaConPrefijo98(d.cuenta, `${d.insumo} (${linea.unidad_negocio})`),
+          cuenta: `${CUENTA_EMBALAJE_LOGISTICA} - ${d.insumo} (${linea.unidad_negocio})`,
           monto: d.costo.toFixed(2)
         }));
 
-      return {
+      // Registros derivados mes a mes en el módulo "Envases y Embalajes" de Logística (cuenta 986142000).
+      // El costo de cada insumo se reparte según el volumen de cada mes del forecast.
+      const factor = obtenerFactorPorUnidad(linea.um);
+      MESES.forEach((mes, iM) => {
+        const volMes = (parseFloat(linea.cantidades?.[mes]) || 0) * factor;
+        if (!(volMes > 0) || !(linea.volumen > 0)) return;
+        const proporcion = volMes / linea.volumen;
+        linea.detalleInsumos.forEach((d, iIns) => {
+          const costoMes = d.costo * proporcion;
+          if (!(costoMes > 0)) return;
+          registrosAGuardar.push({
+            id_registro: `DERIV-EMB-${linea.id_registro}-${iIns}-${mes}`,
+            id_lote: idLoteBase,
+            modulo: MODULO_DESTINO_EMBALAJE,
+            categoria: MODULO_DESTINO_EMBALAJE,
+            area: AREA_LOGISTICA,
+            idVersion,
+            fecha_proyeccion: `${anioSel}-${String(iM + 1).padStart(2, '0')}-01`,
+            empleado_dni: '-',
+            empleado_nombre: `COSTEO EMBALAJE - ${d.insumo.toUpperCase()}`,
+            detalle_columnas: {
+              cuenta_afectada: CUENTA_EMBALAJE_LOGISTICA,
+              producto: `${d.insumo.toUpperCase()} (${linea.producto})`,
+              detalle: `${d.insumo.toUpperCase()} - Para: ${linea.producto} / ${linea.cliente} (${linea.zona})`,
+              unidad_medida: 'unidad',
+              costo_unitario: d.costoUnitario,
+              cantidad: d.consumo * proporcion,
+              costo_total: costoMes,
+              es_derivado: true,
+              extras: { producto: `${d.insumo.toUpperCase()} (${linea.producto})` }
+            },
+            totales: { costo_total: costoMes }
+          });
+        });
+      });
+
+      registrosAGuardar.push({
         id_registro: idRegistro,
         id_lote: idLoteBase,
         modulo: 'Costeo de Embalajes',
         categoria: 'Costeo de Embalajes',
-        area,
+        area: AREA_LOGISTICA,
         idVersion,
         fecha_proyeccion: `${anioSel}-01-01`,
         empleado_dni: '-',
@@ -187,7 +225,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
         },
         totales: { costo_total: linea.costoTotal },
         desglose_contable: desglose,
-      };
+      });
     });
 
     guardarRegistrosLote(registrosAGuardar);
