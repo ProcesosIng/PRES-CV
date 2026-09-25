@@ -1,6 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { listarVersiones } from '../../data/store';
 
+// El Forecast (ventas) y los Costeos (formularios de apoyo que calculan el costo de cada
+// producto) NO son gastos: se ven en sus propias pestañas, no en el consolidado ni en gastos.
+const esForecastOCosteo = (modulo) => {
+  const m = String(modulo || '');
+  return m === 'Forecast de Ventas' || m.startsWith('Costeo de');
+};
+const PESTANAS_SOLO_GASTOS = ['general', 'gastos_areas'];
+
 export default function ReporteGeneral({ registrosTotales = [] }) {
   const [tipoReporte, setTipoReporte] = useState('general');
   const [modoAgrupacionGeneral, setModoAgrupacionGeneral] = useState('detallado');
@@ -36,9 +44,12 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
   }, []);
 
   const modulosDisponibles = useMemo(() => {
-    const modulos = registrosTotales.map(r => r.modulo).filter(Boolean);
+    const modulos = registrosTotales
+      .map(r => r.modulo)
+      .filter(Boolean)
+      .filter(m => !PESTANAS_SOLO_GASTOS.includes(tipoReporte) || !esForecastOCosteo(m));
     return [...new Set(modulos)].sort();
-  }, [registrosTotales]);
+  }, [registrosTotales, tipoReporte]);
 
   const areasDisponibles = useMemo(() => {
     const areas = registrosTotales.map(r => r.area || r.detalle_columnas?.area).filter(Boolean);
@@ -59,6 +70,8 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
   const registrosFiltrados = useMemo(() => {
     const filtrados = registrosTotales.filter(reg => {
       const dc = reg.detalle_columnas || {};
+
+      if (PESTANAS_SOLO_GASTOS.includes(tipoReporte) && esForecastOCosteo(reg.modulo)) return false;
 
       if (filtroVersion && reg.id_version !== filtroVersion) return false;
       if (filtroModulo && reg.modulo !== filtroModulo) return false;

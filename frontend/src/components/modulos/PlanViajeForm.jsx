@@ -167,21 +167,28 @@ export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, i
     setSelectorClienteAbierto(false);
   };
 
+  // Cuentas BASE de clase 6, sin repetir: las que vienen con prefijo de área (9 dígitos,
+  // p. ej. 906311100) se muestran sin él, porque el prefijo se aplica solo según el área.
+  const cuentasBase = useMemo(() => {
+    const mapa = new Map();
+    listaCuentas.forEach(c => {
+      const original = (c.codigo || c.id || '').toString();
+      const base = original.length === 9 ? original.substring(2) : original;
+      if (!base.startsWith('6') || mapa.has(base)) return;
+      mapa.set(base, { ...c, codigoBase: base });
+    });
+    return Array.from(mapa.values()).sort((a, b) => a.codigoBase.localeCompare(b.codigoBase));
+  }, [listaCuentas]);
+
   // Filtrado de cuentas para cada rubro
   const cuentasFiltradas = (texto) => {
     const query = (texto || '').trim().toLowerCase();
-    if (query.length === 0) return listaCuentas.slice(0, 30);
-    const coincidencias = listaCuentas.filter(c => {
-      const nombreStr = String(c.nombre || '').toLowerCase();
-      const codigoStr = String(c.codigo || c.id || '').toLowerCase();
-      return codigoStr.includes(query) || nombreStr.includes(query);
-    });
-    coincidencias.sort((a, b) => {
-      const aCodigo = String(a.codigo || a.id || '').toLowerCase();
-      const bCodigo = String(b.codigo || b.id || '').toLowerCase();
-      return (aCodigo.startsWith(query) ? 0 : 1) - (bCodigo.startsWith(query) ? 0 : 1);
-    });
-    return coincidencias.slice(0, 30);
+    if (query.length === 0) return cuentasBase.slice(0, 50);
+    const coincidencias = cuentasBase.filter(c =>
+      c.codigoBase.toLowerCase().includes(query) || String(c.nombre || '').toLowerCase().includes(query)
+    );
+    coincidencias.sort((a, b) => (a.codigoBase.startsWith(query) ? 0 : 1) - (b.codigoBase.startsWith(query) ? 0 : 1));
+    return coincidencias.slice(0, 50);
   };
 
   const seleccionarCuentaRubro = (index, c) => {
@@ -573,18 +580,19 @@ export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, i
                         }}
                         onFocus={() => setActivoDropdownCuentaId(r.id)}
                         placeholder="Cuenta..."
+                        title={r.cuenta || ''}
                         autoComplete="off"
                         style={{ width: '100%', padding: '6px', border: '1px solid #2563eb', borderRadius: '4px', fontSize: '11px', background: 'white' }} 
                       />
 
                       {dropdownAbierto && sugerenciasCuentas.length > 0 && (
                         <div style={{
-                          position: 'absolute', top: '100%', right: 0, width: '240px', background: 'white',
+                          position: 'absolute', top: '100%', right: 0, width: '420px', maxWidth: '80vw', background: 'white',
                           border: '1px solid #cbd5e1', borderRadius: '0 0 8px 8px',
-                          boxShadow: '0 8px 16px -4px rgba(15,23,42,0.15)', maxHeight: '180px', overflowY: 'auto', zIndex: 90, marginTop: '2px'
+                          boxShadow: '0 8px 16px -4px rgba(15,23,42,0.15)', maxHeight: '260px', overflowY: 'auto', zIndex: 90, marginTop: '2px'
                         }}>
                           {sugerenciasCuentas.map((c, cIdx) => {
-                            const codOrig = (c.codigo || c.id || '').toString();
+                            const codOrig = c.codigoBase || (c.codigo || c.id || '').toString();
                             return (
                               <div
                                 key={`cta-rub-${cIdx}`}
@@ -592,12 +600,13 @@ export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, i
                                   ev.preventDefault();
                                   seleccionarCuentaRubro(idx, c);
                                 }}
-                                style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '11px', color: '#1e293b', display: 'flex', gap: '6px' }}
+                                title={`${codOrig} - ${c.nombre}`}
+                                style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '11px', color: '#1e293b', display: 'flex', gap: '8px', alignItems: 'flex-start' }}
                                 onMouseEnter={ev => ev.currentTarget.style.background = '#f8fafc'}
                                 onMouseLeave={ev => ev.currentTarget.style.background = 'white'}
                               >
-                                <span style={{ fontFamily: 'monospace', color: '#2563eb', fontWeight: 700 }}>{codOrig}</span>
-                                <span style={{ color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nombre}</span>
+                                <span style={{ fontFamily: 'monospace', color: '#2563eb', fontWeight: 700, flexShrink: 0 }}>{codOrig}</span>
+                                <span style={{ color: '#334155', whiteSpace: 'normal', lineHeight: 1.35 }}>{c.nombre}</span>
                               </div>
                             );
                           })}

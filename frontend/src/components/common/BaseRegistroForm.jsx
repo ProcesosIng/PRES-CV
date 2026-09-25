@@ -346,7 +346,6 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
     const fechasFinales = [...fechasSeleccionadas];
     
     if (fechasFinales.length === 0) return alert('Por favor, ingrese al menos una fecha.');
-    if (!valorBuscador) return alert('Por favor, seleccione un empleado.');
     if (!detalles || detalles.length === 0 || !detalles[0].cuenta) {
       return alert(config?.mensajeValidacion || 'Agregue al menos una cuenta contable.');
     }
@@ -355,9 +354,13 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
 
     const moduloActual = config?.modulo || config?.categoria || registro?.modulo || 'General';
 
-    const dniEmp = datosAuto.dni || valorBuscador.split(' - ')[0] || '-';
-    const empInfo = listaEmpleadosOdoo.find(e => (e.dni || e.id || e.id_empleado)?.toString() === dniEmp.toString());
-    const nombreEmpleado = empInfo ? empInfo.nombre : (valorBuscador.split(' - ')[1] || 'Desconocido');
+    // El empleado es opcional: si no se eligió, el gasto queda a nombre del ÁREA.
+    const sinEmpleado = !valorBuscador.trim();
+    const dniEmp = sinEmpleado ? '-' : (datosAuto.dni || valorBuscador.split(' - ')[0] || '-');
+    const empInfo = sinEmpleado ? null : listaEmpleadosOdoo.find(e => (e.dni || e.id || e.id_empleado)?.toString() === dniEmp.toString());
+    const nombreEmpleado = sinEmpleado
+      ? `ÁREA ${String(areaActual || 'SIN ÁREA').toUpperCase()}`
+      : (empInfo ? empInfo.nombre : (valorBuscador.split(' - ')[1] || valorBuscador.trim()));
 
     const distVal = parseFloat(datosAuto.dist) || 100;
     
@@ -469,7 +472,7 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
         <div className="form-section">
           <div className="form-section-title">1. Información General</div>
           <div className="form-group" style={{ marginBottom: '16px', position: 'relative' }}>
-            <label style={{ color: 'var(--primary-600, #2563eb)' }}>BUSCAR EMPLEADO (MÍNIMO 3 CARACTERES)</label>
+            <label style={{ color: 'var(--primary-600, #2563eb)' }}>BUSCAR EMPLEADO (OPCIONAL, MÍNIMO 3 CARACTERES)</label>
             <input 
               type="text" 
               value={valorBuscador} 
