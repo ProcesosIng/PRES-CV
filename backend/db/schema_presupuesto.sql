@@ -26,13 +26,21 @@ CREATE TABLE IF NOT EXISTS ppto_versiones (
   eliminado_en     TIMESTAMPTZ
 );
 
+-- CABECERA: un registro de cualquier módulo y área.
+-- Los datos comunes van en columnas (para reportes); lo propio de cada módulo, en `datos`.
 CREATE TABLE IF NOT EXISTS ppto_registros (
   id_registro      VARCHAR(255) PRIMARY KEY,
   id_version       VARCHAR(40)  NOT NULL REFERENCES ppto_versiones(id_version),
   area             VARCHAR(120) NOT NULL,
   modulo           VARCHAR(160) NOT NULL,
+  tipo_registro    VARCHAR(20)  NOT NULL DEFAULT 'gasto',      -- gasto | costeo (formulario de apoyo) | forecast (ventas)
   id_lote          VARCHAR(255),                               -- agrupa un costeo con sus registros derivados
-  fecha_proyeccion TEXT,
+  fecha_proyeccion DATE,
+  anio             SMALLINT,
+  mes              SMALLINT,
+  detalle          TEXT,                                       -- concepto / descripción
+  nombre_referencia TEXT,                                      -- empleado, producto o insumo
+  monto_total      NUMERIC(18,2) NOT NULL DEFAULT 0,
   es_derivado      BOOLEAN      NOT NULL DEFAULT false,        -- generado automáticamente por un costeo
   datos            JSONB        NOT NULL,                      -- registro completo tal como lo usa el frontend
   rev              INTEGER      NOT NULL DEFAULT 1,
@@ -47,6 +55,38 @@ CREATE TABLE IF NOT EXISTS ppto_registros (
 
 CREATE INDEX IF NOT EXISTS ix_ppto_registros_jerarquia ON ppto_registros (id_version, area, modulo) WHERE NOT eliminado;
 CREATE INDEX IF NOT EXISTS ix_ppto_registros_lote      ON ppto_registros (id_lote) WHERE id_lote IS NOT NULL;
+
+-- DETALLE: una fila por cuenta contable + mes + monto de cada registro.
+-- Se regenera automáticamente cada vez que se guarda el registro.
+CREATE TABLE IF NOT EXISTS ppto_registro_lineas (
+  id              BIGSERIAL     PRIMARY KEY,
+  id_registro     VARCHAR(255)  NOT NULL REFERENCES ppto_registros(id_registro) ON DELETE CASCADE,
+  id_version      VARCHAR(40)   NOT NULL,
+  area            VARCHAR(120)  NOT NULL,
+  modulo          VARCHAR(160)  NOT NULL,
+  tipo_registro   VARCHAR(20)   NOT NULL,
+  fecha           DATE,
+  anio            SMALLINT,
+  mes             SMALLINT,
+  cuenta_codigo   VARCHAR(40),                                 -- p. ej. 916121000
+  cuenta_nombre   TEXT,                                        -- p. ej. Materias primas - Materias primas
+  detalle         TEXT,
+  monto           NUMERIC(18,2) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS ix_ppto_lineas_registro ON ppto_registro_lineas (id_registro);
+CREATE INDEX IF NOT EXISTS ix_ppto_lineas_reporte  ON ppto_registro_lineas (id_version, area, cuenta_codigo, anio, mes);
+
+-- Vista para el REPORTE DE GASTOS: solo gastos (sin costeos ni forecast), sin eliminados.
+--   SELECT area, cuenta_codigo, mes, SUM(monto) FROM v_ppto_gastos WHERE id_version = 'v1' GROUP BY 1,2,3;
+CREATE OR REPLACE VIEW v_ppto_gastos AS
+SELECT l.id_version, v.nombre AS version_nombre, l.area, l.modulo, l.anio, l.mes, l.fecha,
+       l.cuenta_codigo, l.cuenta_nombre, l.detalle, r.nombre_referencia, l.monto,
+       r.id_registro, r.es_derivado, r.creado_por, r.creado_en, r.actualizado_por, r.actualizado_en
+  FROM ppto_registro_lineas l
+  JOIN ppto_registros r ON r.id_registro = l.id_registro AND NOT r.eliminado
+  JOIN ppto_versiones v ON v.id_version = l.id_version AND NOT v.eliminado
+ WHERE l.tipo_registro = 'gasto';
 
 -- Historial de cambios: valor anterior y nuevo de cada creación, edición, eliminación o restauración.
 CREATE TABLE IF NOT EXISTS ppto_auditoria (
