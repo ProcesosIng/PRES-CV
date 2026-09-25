@@ -40,6 +40,18 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
   const [cuentasBD, setCuentasBD] = useState([]);
   const [filaAbierta, setFilaAbierta] = useState(null);
 
+  // Cierra la lista de insumos al hacer clic fuera de ella
+  useEffect(() => {
+    if (!filaAbierta) return;
+    const handleClickFuera = (event) => {
+      if (!event.target.closest(`[data-dropdown-emb="${filaAbierta}"]`)) {
+        setFilaAbierta(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickFuera);
+    return () => document.removeEventListener('mousedown', handleClickFuera);
+  }, [filaAbierta]);
+
   useEffect(() => {
     let activo = true;
     Promise.all([obtenerProductosOdoo(), obtenerCuentasOdoo()]).then(([prod, cta]) => {
@@ -227,7 +239,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
             </div>
             {insumosEmbalaje.map(item => (
               <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '2fr 90px 90px 90px auto', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
-                <div style={{ position: 'relative' }}>
+                <div data-dropdown-emb={item.id} style={{ position: 'relative' }}>
                   <input type="text" value={item.insumo} placeholder="Buscar insumo (paleta, zuncho, film...)"
                     onChange={e => { actInsumo(item.id, 'insumo', e.target.value); setFilaAbierta(item.id); }}
                     onFocus={() => setFilaAbierta(item.id)}
