@@ -88,6 +88,62 @@ SELECT l.id_version, v.nombre AS version_nombre, l.area, l.modulo, l.anio, l.mes
   JOIN ppto_versiones v ON v.id_version = l.id_version AND NOT v.eliminado
  WHERE l.tipo_registro = 'gasto';
 
+-- FORECAST DE VENTAS: una fila por registro de forecast (producto + cliente) y mes.
+-- Se regenera cada vez que se guarda el forecast. Montos en la moneda del forecast y en soles.
+CREATE TABLE IF NOT EXISTS ppto_forecast_mensual (
+  id                BIGSERIAL     PRIMARY KEY,
+  id_registro       VARCHAR(255)  NOT NULL REFERENCES ppto_registros(id_registro) ON DELETE CASCADE,
+  id_version        VARCHAR(40)   NOT NULL,
+  anio              SMALLINT,
+  mes               SMALLINT      NOT NULL,
+  unidad_negocio    VARCHAR(120),
+  codigo_producto   VARCHAR(80),
+  producto          TEXT,
+  presentacion      VARCHAR(80),                 -- Granel / Sachet (Fundente)
+  cliente           TEXT,
+  tipo_cliente      VARCHAR(80),
+  vendedor          TEXT,
+  zona              VARCHAR(40),                 -- Local / Exterior
+  pais              VARCHAR(80),
+  um                VARCHAR(40),
+  moneda            VARCHAR(10),
+  tipo_cambio       NUMERIC(12,4),
+  cantidad          NUMERIC(18,4) NOT NULL DEFAULT 0,   -- cantidad proyectada del mes
+  probabilidad      NUMERIC(6,2)  NOT NULL DEFAULT 100, -- % de probabilidad de la venta
+  cantidad_esperada NUMERIC(18,4) NOT NULL DEFAULT 0,   -- cantidad x probabilidad
+  precio_venta      NUMERIC(18,4) NOT NULL DEFAULT 0,
+  costo_unitario    NUMERIC(18,4) NOT NULL DEFAULT 0,
+  ingreso           NUMERIC(18,2) NOT NULL DEFAULT 0,   -- cantidad esperada x precio (en la moneda del forecast)
+  costo             NUMERIC(18,2) NOT NULL DEFAULT 0,
+  margen            NUMERIC(18,2) NOT NULL DEFAULT 0,
+  ingreso_soles     NUMERIC(18,2) NOT NULL DEFAULT 0,
+  costo_soles       NUMERIC(18,2) NOT NULL DEFAULT 0,
+  margen_soles      NUMERIC(18,2) NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS ix_ppto_forecast_registro ON ppto_forecast_mensual (id_registro);
+CREATE INDEX IF NOT EXISTS ix_ppto_forecast_reporte  ON ppto_forecast_mensual (id_version, anio, producto, mes);
+
+-- Detalle del forecast sin eliminados (por producto, cliente y mes).
+CREATE OR REPLACE VIEW v_ppto_forecast AS
+SELECT f.*, v.nombre AS version_nombre, r.creado_por, r.actualizado_por, r.actualizado_en
+  FROM ppto_forecast_mensual f
+  JOIN ppto_registros r ON r.id_registro = f.id_registro AND NOT r.eliminado
+  JOIN ppto_versiones v ON v.id_version = f.id_version AND NOT v.eliminado;
+
+-- Totales por PRODUCTO y MES (suma de todos los clientes), en soles.
+CREATE OR REPLACE VIEW v_ppto_forecast_producto_mes AS
+SELECT id_version, anio, mes, unidad_negocio, codigo_producto, producto, um,
+       SUM(cantidad)          AS cantidad,
+       SUM(cantidad_esperada) AS cantidad_esperada,
+       SUM(ingreso_soles)     AS ingreso_soles,
+       SUM(costo_soles)       AS costo_soles,
+       SUM(margen_soles)      AS margen_soles,
+       CASE WHEN SUM(cantidad_esperada) > 0 THEN ROUND(SUM(ingreso_soles) / SUM(cantidad_esperada), 4) END AS precio_promedio_soles,
+       CASE WHEN SUM(cantidad_esperada) > 0 THEN ROUND(SUM(costo_soles)   / SUM(cantidad_esperada), 4) END AS costo_promedio_soles
+  FROM v_ppto_forecast
+ GROUP BY id_version, anio, mes, unidad_negocio, codigo_producto, producto, um;
+
 -- Historial de cambios: valor anterior y nuevo de cada creación, edición, eliminación o restauración.
 CREATE TABLE IF NOT EXISTS ppto_auditoria (
   id           BIGSERIAL    PRIMARY KEY,
