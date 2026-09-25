@@ -31,6 +31,23 @@ class ErrorApi extends Error {
 async function inicializarEsquemaPresupuesto(pool) {
   const sql = fs.readFileSync(path.join(__dirname, 'db', 'schema_presupuesto.sql'), 'utf8');
   await pool.query(sql);
+  await completarForecastExistente(pool);
+}
+
+// Forecast guardados antes de existir ppto_forecast_mensual: se generan sus filas mensuales
+// y se quitan las "cuentas" de ventas/costo que antes quedaban en ppto_registro_lineas.
+async function completarForecastExistente(pool) {
+  await pool.query("DELETE FROM ppto_registro_lineas WHERE tipo_registro = 'forecast'");
+  const pendientes = await pool.query(
+    `SELECT r.* FROM ppto_registros r
+      WHERE r.tipo_registro = 'forecast' AND NOT r.eliminado
+        AND NOT EXISTS (SELECT 1 FROM ppto_forecast_mensual f WHERE f.id_registro = r.id_registro)`
+  );
+  for (const f of pendientes.rows) {
+    const r = filaARegistro(f);
+    await guardarForecastMensual(pool, r, camposCabecera(r));
+  }
+  if (pendientes.rowCount > 0) console.log(`✅ Forecast mensual generado para ${pendientes.rowCount} registros existentes`);
 }
 
 // TEMPORAL hasta el login con Microsoft: el usuario viene en la cabecera x-usuario.
@@ -82,7 +99,9 @@ function camposCabecera(r) {
 }
 
 // Líneas contables del registro: una por cada cuenta del desglose (o la cuenta afectada si no hay desglose).
+// El forecast no genera líneas contables: va a ppto_forecast_mensual.
 function lineasDe(r, cab) {
+  if (cab.tipo === 'forecast') return [];
   const dc = r.detalle_columnas || {};
   const desglose = Array.isArray(r.desglose_contable) ? r.desglose_contable.filter(d => d && (d.cuenta || d.monto)) : [];
   const base = desglose.length > 0
@@ -108,6 +127,45 @@ async function guardarLineas(cx, r, cab) {
     `INSERT INTO ppto_registro_lineas (id_registro, id_version, area, modulo, tipo_registro, fecha, anio, mes, cuenta_codigo, cuenta_nombre, detalle, monto)
      VALUES ${valores.join(',')}`,
     params
+  );
+}
+
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
+
+// Forecast: una fila por mes con cantidad, probabilidad, precio, costo, ingreso y margen (también en soles).
+async function guardarForecastMensual(cx, r, cab) {
+  await cx.query('DELETE FROM ppto_forecast_mensual WHERE id_registro = $1', [r.id_registro]);
+  if (cab.tipo !== 'forecast') return;
+  const dc = r.detalle_columnas || {};
+  const anio = parseInt(dc.anio_proyeccion, 10) || cab.anio;
+  const moneda = dc.moneda || 'S/';
+  const tc = moneda === 'US$' ? (num(dc.tipo_cambio) || 1) : 1;
+  const precio = num(dc.precio_venta);
+  const costoU = num(dc.costo_unitario);
+  const probDe = (m) => (dc.tipo_probabilidad === 'general' || !dc.probabilidades_meses)
+    ? num(dc.probabilidad_general ?? 100)
+    : num(dc.probabilidades_meses?.[m] ?? 100);
+
+  const filas = MESES.map((m, i) => {
+    const cantidad = num(dc.cantidades?.[m]);
+    const prob = probDe(m);
+    const esperada = cantidad * prob / 100;
+    const ingreso = esperada * precio;
+    const costo = esperada * costoU;
+    return [r.id_registro, r.id_version, anio, i + 1, dc.unidad_negocio || null, dc.codigo_producto || null, dc.producto || null,
+      dc.presentacion_fundente || null, dc.cliente || null, dc.tipo_cliente || null, dc.vendedor || null, dc.zona || null, dc.pais || null,
+      dc.um || null, moneda, tc, cantidad, prob, esperada, precio, costoU, ingreso, costo, ingreso - costo, ingreso * tc, costo * tc, (ingreso - costo) * tc];
+  }).filter(f => f[16] !== 0);
+  if (filas.length === 0) return;
+
+  const nCols = filas[0].length;
+  const valores = filas.map((_, i) => `(${Array.from({ length: nCols }, (_, k) => `$${i * nCols + k + 1}`).join(',')})`);
+  await cx.query(
+    `INSERT INTO ppto_forecast_mensual (id_registro, id_version, anio, mes, unidad_negocio, codigo_producto, producto, presentacion, cliente, tipo_cliente,
+       vendedor, zona, pais, um, moneda, tipo_cambio, cantidad, probabilidad, cantidad_esperada, precio_venta, costo_unitario, ingreso, costo, margen,
+       ingreso_soles, costo_soles, margen_soles)
+     VALUES ${valores.join(',')}`,
+    filas.flat()
   );
 }
 
@@ -203,6 +261,7 @@ async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAudito
       [r.id_registro, r.id_version, r.area, r.modulo, cab.tipo, r.id_lote || null, cab.fecha, cab.anio, cab.mes, cab.detalle, cab.nombre, cab.monto, derivado, JSON.stringify(datos), ctx.usuario]
     );
     await guardarLineas(cx, r, cab);
+  await guardarForecastMensual(cx, r, cab);
     if (conAuditoria && !derivado) {
       await auditar(cx, { ...ctx, accion: 'CREAR', tabla: 'ppto_registros', id_objeto: r.id_registro, id_version: r.id_version, area: r.area, modulo: r.modulo, despues: datos });
     }
@@ -225,6 +284,7 @@ async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAudito
     [r.id_registro, r.id_version, r.area, r.modulo, cab.tipo, r.id_lote || null, cab.fecha, cab.anio, cab.mes, cab.detalle, cab.nombre, cab.monto, derivado, JSON.stringify(datos), ctx.usuario]
   );
   await guardarLineas(cx, r, cab);
+  await guardarForecastMensual(cx, r, cab);
   if (conAuditoria && !derivado) {
     await auditar(cx, { ...ctx, accion: previo.eliminado ? 'RESTAURAR' : 'ACTUALIZAR', tabla: 'ppto_registros', id_objeto: r.id_registro,
       id_version: r.id_version, area: r.area, modulo: r.modulo, antes: previo.datos, despues: datos });
