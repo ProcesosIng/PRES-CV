@@ -357,19 +357,24 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
   const anioDeRegistro = (reg) => String(reg.detalle_columnas?.anio_proyeccion || numMesDe(reg.fecha_proyeccion)?.anio || '');
   const esCosteoProduccion = (m) => String(m || '').startsWith('Costeo de') && m !== 'Costeo de Embalajes';
 
-  // Años con datos en la pestaña actual (el Gantt muestra un año a la vez)
+  // Años con datos en la pestaña actual (el Gantt muestra un año a la vez).
+  // En Compras se toman solo los años que tienen COMPRAS: si se usaran todos los registros,
+  // un año con solo remuneraciones (p. ej. 2026) quedaba elegido y la matriz salía vacía.
   const aniosGantt = useMemo(() => {
     const set = new Set();
-    registrosTotales.forEach(reg => {
-      const incluir = tipoReporte === 'forecast' ? reg.modulo === 'Forecast de Ventas'
-        : tipoReporte === 'produccion' ? esCosteoProduccion(reg.modulo)
-        : tipoReporte === 'compras' ? !esForecastOCosteo(reg.modulo) : false;
-      if (!incluir) return;
-      const a = anioDeRegistro(reg);
-      if (a) set.add(a);
-    });
+    if (tipoReporte === 'compras') {
+      resumenPlanCompras.forEach(item => { const f = numMesDe(item.fecha); if (f) set.add(f.anio); });
+    } else {
+      registrosTotales.forEach(reg => {
+        const incluir = tipoReporte === 'forecast' ? reg.modulo === 'Forecast de Ventas'
+          : tipoReporte === 'produccion' ? esCosteoProduccion(reg.modulo) : false;
+        if (!incluir) return;
+        const a = anioDeRegistro(reg);
+        if (a) set.add(a);
+      });
+    }
     return Array.from(set).sort();
-  }, [registrosTotales, tipoReporte]);
+  }, [registrosTotales, resumenPlanCompras, tipoReporte]);
 
   const anioActivoGantt = aniosGantt.includes(anioGantt) ? anioGantt : (aniosGantt[0] || '');
 
