@@ -170,10 +170,15 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
     const tipoPresentacionLabel = esSachet ? 'SACHET' : 'GRANEL';
 
     const prodLimpio = nombreProducto.trim().toLowerCase();
-    const formulaEncontrada = formulasBD.find(f => {
-      const nombreEnBd = String(f.producto_terminado || f.nombre_producto || f.producto || '').trim().toLowerCase();
-      return nombreEnBd === prodLimpio || prodLimpio.includes(nombreEnBd) || nombreEnBd.includes(prodLimpio);
-    });
+    const nombreFormula = (f) => String(f.producto_terminado || f.nombre_producto || f.producto || '').trim().toLowerCase();
+    // Primero la coincidencia EXACTA: con búsqueda parcial, "FUNDENTE #1" tomaba la
+    // lista de "FUNDENTE #104" si aparecía antes. La parcial queda solo como respaldo.
+    const formulaEncontrada =
+      formulasBD.find(f => nombreFormula(f) === prodLimpio) ||
+      formulasBD.find(f => {
+        const nombreEnBd = nombreFormula(f);
+        return nombreEnBd && (prodLimpio.includes(nombreEnBd) || nombreEnBd.includes(prodLimpio));
+      });
 
     if (!formulaEncontrada || !Array.isArray(formulaEncontrada.materia_prima) || formulaEncontrada.materia_prima.length === 0) {
       return { 
@@ -183,6 +188,8 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
     }
 
     const codigoBOM = formulaEncontrada.codigo_formula || formulaEncontrada.codigo || formulaEncontrada.bom_id || 'BOM-Auto';
+    // La cantidad de la BOM es para `cantidad_base` unidades: el ratio es por 1 unidad producida.
+    const cantidadBase = parseFloat(formulaEncontrada.cantidad_base) > 0 ? parseFloat(formulaEncontrada.cantidad_base) : 1;
     const listaMateriales = [];
     const listaSuministros = [];
 
@@ -217,7 +224,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
         tipoCalculo: 'ratio',
         modoCalculoP2: 'ratio',
         formato: tipoPresentacionLabel,
-        valor: String(ins.cantidad_por_unidad || ins.cantidad || 0),
+        valor: String(+((parseFloat(ins.cantidad_por_unidad || ins.cantidad || 0) || 0) / cantidadBase).toFixed(6)),
         // FIX: el reduce ahora tiene valor inicial {} (antes generaba claves basura 0, 1, 2...)
         porcentajeAsignacionMeses: MESES.reduce((acc, m) => ({ ...acc, [m]: '100' }), {}),
         costoUnitario: costoFinal > 0 ? costoFinal.toFixed(4) : '0',
@@ -532,7 +539,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
   };
 
   const embalajePorProducto = useMemo(
-  () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel }),
+  () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel, unidadNegocio: 'Fundente' }),
     [idVersion, anioSel]
   );
 
@@ -1254,10 +1261,14 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
               const itemsDelGrupo = materiales.filter(m => m.productoAsociado === prodAsociado);
               const esGeneral = !prodAsociado;
 
-              const bomDisponiblesParaEsteProducto = formulasBD.filter(f => {
-                const nombreEnBd = String(f.producto_terminado || f.nombre_producto || f.producto || '').trim().toLowerCase();
-                const prodLimpio = String(prodAsociado || '').trim().toLowerCase();
-                return nombreEnBd === prodLimpio || prodLimpio.includes(nombreEnBd) || nombreEnBd.includes(prodLimpio);
+              const prodLimpioBom = String(prodAsociado || '').trim().toLowerCase();
+              const nombreBom = (f) => String(f.producto_terminado || f.nombre_producto || f.producto || '').trim().toLowerCase();
+              // Si hay listas con el nombre EXACTO del producto se muestran solo esas
+              // (evita que "FUNDENTE #1" ofrezca las de "FUNDENTE #104", "#118"...).
+              const bomExactas = formulasBD.filter(f => nombreBom(f) === prodLimpioBom);
+              const bomDisponiblesParaEsteProducto = bomExactas.length > 0 ? bomExactas : formulasBD.filter(f => {
+                const nombreEnBd = nombreBom(f);
+                return nombreEnBd && (prodLimpioBom.includes(nombreEnBd) || nombreEnBd.includes(prodLimpioBom));
               });
 
               const prodCants = calcularProdPorProducto(prodAsociado);
@@ -1295,6 +1306,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
                               const codigoSeleccionado = e.target.value;
                               const formulaElegida = bomDisponiblesParaEsteProducto.find(f => (f.codigo_formula || f.codigo || f.bom_id) === codigoSeleccionado);
                               if (formulaElegida && Array.isArray(formulaElegida.materia_prima)) {
+                                const cantidadBase = parseFloat(formulaElegida.cantidad_base) > 0 ? parseFloat(formulaElegida.cantidad_base) : 1;
                                 const nuevosInsumos = formulaElegida.materia_prima.map((ins, idx) => {
                                   const nombreInsumo = Array.isArray(ins.insumo) ? String(ins.insumo[1]) : String(ins.insumo || ins.nombre || 'Insumo');
                                   const productoEnMaestro = productosBD.find(p => String(p.nombre || p.descripcion || '').trim().toLowerCase() === nombreInsumo.trim().toLowerCase());
@@ -1309,7 +1321,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
                                     moduloDestino: 'Materias Primas',
                                     udm: String(ins.unidad_medida || ins.unidad || 'kg'),
                                     tipoCalculo: 'ratio',
-                                    valor: String(ins.cantidad_por_unidad || ins.cantidad || 0),
+                                    valor: String(+((parseFloat(ins.cantidad_por_unidad || ins.cantidad || 0) || 0) / cantidadBase).toFixed(6)),
                                     porcentajeAsignacionMeses: MESES.reduce((acc, m) => ({ ...acc, [m]: '100' }), {}),
                                     costoUnitario: costoFinal > 0 ? costoFinal.toFixed(4) : '0',
                                     usarParticipacion: false
