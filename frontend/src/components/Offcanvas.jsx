@@ -10,7 +10,7 @@ import CosteoCrisolesForm from './modulos/CosteoCrisolesForm';
 import CosteoFundenteForm from './modulos/CosteoFundenteForm';
 import BaseRegistroForm from './common/BaseRegistroForm';
 import { MODULOS_CONFIG } from '../config/modulosConfig';
-import { listarRegistros, guardarRegistro } from '../data/store';
+import { guardarRegistro } from '../data/store';
 
 // Antes: recibía `registrosActuales` + `setRegistros` y hacía el merge de
 // listas a mano (filtrar el registro editado y volver a insertar). Ahora
