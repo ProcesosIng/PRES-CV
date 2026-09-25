@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom'; // 👈 1. Importamos createPortal
 import { maestroEmpleados, PROCESOS_PRODUCTIVOS, MESES } from '../../config/data';
+import { API_URL } from '../../config/api';
 
 export default function RemuneracionesForm({ registro, onGuardar, onCancelar, modo, area }) {
 
@@ -55,7 +56,7 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
   useEffect(() => {
     async function cargarEmpleadosOdoo() {
       try {
-        const respuesta = await fetch('http://localhost:5000/api/maestros/empleados');
+        const respuesta = await fetch(`${API_URL}/api/maestros/empleados`);
         if (respuesta.ok) {
           const data = await respuesta.json();
           setListaEmpleadosOdoo(data || []);

@@ -3,22 +3,57 @@
 //
 // Jerarquía: Versión -> Área -> Módulo -> Registros
 //
-// Hoy persiste en localStorage (funciona sin backend), pero está escrita
-// con la MISMA forma que el esquema relacional de referencia
-// (ver src/data/schema.sql), para que el día que exista un backend real
-// solo haya que reemplazar el cuerpo de estas funciones por llamadas
-// fetch/axios — los componentes que las usan (Dashboard, Offcanvas,
-// SelectorVersiones) no deberían necesitar cambios.
+// Los datos viven en la BASE DE DATOS (backend: /api/versiones, /api/registros).
+// Para que los componentes no cambien, las LECTURAS siguen siendo síncronas:
+// al iniciar se carga todo en una caché en memoria (inicializarDatos) y cada
+// ESCRITURA actualiza la caché al instante y se envía a la API en segundo plano,
+// en orden. Si la API rechaza un cambio (p. ej. otro usuario editó lo mismo),
+// se avisa y se recarga desde el servidor.
 //
-// Antes: cada versión/área compartía el mismo estado en memoria
-// (registrosPorCategoria, indexado solo por nombre de módulo), lo que
-// mezclaba datos de áreas distintas. Aquí cada registro queda
-// físicamente separado por (id_version, area, modulo).
+// Si el servidor no responde al iniciar, se trabaja en MODO LOCAL (localStorage,
+// solo en este navegador) y la app lo muestra en un aviso.
 // =====================================================================
+import { API_URL } from '../config/api';
 
 const DB_KEY = 'cv_presupuestos_db_v1';
+const IMPORTADO_KEY = 'cv_presupuestos_importado_v1';
 
-function leerDB() {
+let cache = null;               // { versiones, registros }
+let modo = 'local';             // 'servidor' | 'local'
+let usuarioSesion = '';         // TEMPORAL hasta el login con Microsoft
+let pendientes = 0;
+let ultimoError = null;
+let cola = Promise.resolve();
+
+const emitir = (tipo, detalle = {}) => {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(tipo, { detail: detalle }));
+};
+const emitirEstado = () => emitir('presupuesto:estado', estadoConexion());
+
+export function estadoConexion() {
+  return { modo, pendientes, ultimoError };
+}
+
+export function establecerUsuarioSesion(usuario) {
+  usuarioSesion = usuario || '';
+}
+
+async function api(ruta, { method = 'GET', body } = {}) {
+  const resp = await fetch(`${API_URL}/api${ruta}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(usuarioSesion ? { 'x-usuario': usuarioSesion } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = new Error(data.error || `Error ${resp.status} en ${ruta}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+function leerLocal() {
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (!raw) return semilla();
@@ -30,10 +65,95 @@ function leerDB() {
   }
 }
 
-function guardarDB(db) {
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
+// Carga inicial desde el servidor. Llamarla antes de mostrar la app.
+export async function inicializarDatos() {
+  try {
+    const datos = await api('/presupuesto/datos');
+    cache = { versiones: datos.versiones || [], registros: datos.registros || [] };
+    modo = 'servidor';
+    ultimoError = null;
+  } catch (e) {
+    console.error('Servidor no disponible, se usa el modo local:', e);
+    cache = leerLocal();
+    modo = 'local';
+    ultimoError = 'No se pudo conectar con el servidor: los cambios se guardan solo en este navegador.';
+  }
+  emitirEstado();
+  return estadoConexion();
 }
 
+function leerDB() {
+  if (!cache) cache = leerLocal();
+  return cache;
+}
+
+function guardarDB(db) {
+  cache = db;
+  if (modo === 'local') {
+    try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) { console.error(e); }
+  }
+}
+
+// Envía una operación a la API, en orden. `alResponder` recibe la respuesta para actualizar la caché.
+function sincronizar(descripcion, llamada, alResponder) {
+  if (modo !== 'servidor') return;
+  pendientes++;
+  emitirEstado();
+  cola = cola
+    .then(async () => {
+      const resp = await llamada();
+      if (alResponder) alResponder(resp);
+      ultimoError = null;
+    })
+    .catch(async (e) => {
+      console.error(`Error al guardar (${descripcion}):`, e);
+      ultimoError = `No se pudo guardar (${descripcion}): ${e.message}`;
+      alert(`${ultimoError}\n\nSe recargarán los datos del servidor.`);
+      await inicializarDatos();
+      emitir('presupuesto:recargado');
+    })
+    .finally(() => {
+      pendientes--;
+      emitirEstado();
+    });
+}
+
+// Reemplaza en la caché los registros que devolvió el servidor (traen rev, creado_por, etc.).
+function actualizarCacheRegistros(registrosServidor) {
+  if (!Array.isArray(registrosServidor) || !cache) return;
+  const porId = new Map(registrosServidor.map(r => [r.id_registro, r]));
+  cache.registros = cache.registros.map(r => porId.has(r.id_registro) ? { ...r, ...porId.get(r.id_registro) } : r);
+}
+
+// ----- Migración única: lo que quedó en localStorage de este navegador -----
+export function hayDatosLocalesParaImportar() {
+  if (modo !== 'servidor') return false;
+  try {
+    if (localStorage.getItem(IMPORTADO_KEY)) return false;
+    const raw = localStorage.getItem(DB_KEY);
+    if (!raw) return false;
+    const db = JSON.parse(raw);
+    return Array.isArray(db.registros) && db.registros.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function importarDatosLocales() {
+  const local = JSON.parse(localStorage.getItem(DB_KEY) || '{}');
+  const registros = (local.registros || []).map(r => ({ ...r, id_version: r.id_version || r.idVersion }));
+  const resumen = await api('/presupuesto/importar', { method: 'POST', body: { versiones: local.versiones || [], registros } });
+  localStorage.setItem(IMPORTADO_KEY, new Date().toISOString());
+  await inicializarDatos();
+  emitir('presupuesto:recargado');
+  return resumen;
+}
+
+export function descartarImportacionLocal() {
+  localStorage.setItem(IMPORTADO_KEY, `descartado ${new Date().toISOString()}`);
+}
+
+// Datos iniciales del MODO LOCAL (sin servidor).
 function semilla() {
   const db = {
     versiones: [
@@ -47,7 +167,7 @@ function semilla() {
     ],
     registros: [],
   };
-  guardarDB(db);
+  try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch { /* sin almacenamiento */ }
   return db;
 }
 
@@ -100,13 +220,22 @@ export function crearVersion({ nombre, estado = 'Borrador', clonarDesde = '' }) 
   }
 
   guardarDB(db);
+  const clonados = clonarDesde ? db.registros.filter(r => r.id_version === idVersion) : [];
+  sincronizar('crear versión', () => api('/versiones', { method: 'POST', body: { version: nuevaVersion, registros: clonados } }), (resp) => {
+    cache.versiones = cache.versiones.map(v => v.id_version === idVersion ? { ...v, ...resp.version } : v);
+    actualizarCacheRegistros(resp.registros);
+  });
   return nuevaVersion;
 }
 
 export function actualizarVersion(idVersion, cambios) {
   const db = leerDB();
+  const rev = db.versiones.find(v => v.id_version === idVersion)?.rev;
   db.versiones = db.versiones.map(v => (v.id_version === idVersion ? { ...v, ...cambios } : v));
   guardarDB(db);
+  sincronizar('actualizar versión', () => api(`/versiones/${encodeURIComponent(idVersion)}`, { method: 'PUT', body: { cambios, rev } }), (resp) => {
+    cache.versiones = cache.versiones.map(v => v.id_version === idVersion ? { ...v, ...resp } : v);
+  });
   return db.versiones.find(v => v.id_version === idVersion) || null;
 }
 
@@ -115,6 +244,7 @@ export function eliminarVersion(idVersion) {
   db.versiones = db.versiones.filter(v => v.id_version !== idVersion);
   db.registros = db.registros.filter(r => r.id_version !== idVersion);
   guardarDB(db);
+  sincronizar('eliminar versión', () => api(`/versiones/${encodeURIComponent(idVersion)}`, { method: 'DELETE' }));
 }
 
 // ===================== REGISTROS =====================
@@ -165,6 +295,7 @@ export function guardarRegistro(registrosEntrada, contexto = {}) {
   // Normalizamos a un arreglo para aceptar tanto un objeto como un array de registros
   const listaAProcesar = Array.isArray(registrosEntrada) ? registrosEntrada : [registrosEntrada];
 
+  const guardados = [];
   listaAProcesar.forEach(nuevoRegistro => {
     // Heredamos el contexto si el registro individual no lo trae explícito
     const regConContexto = {
@@ -188,17 +319,21 @@ export function guardarRegistro(registrosEntrada, contexto = {}) {
         ...regConContexto,
         actualizado_en: ahora
       };
+      guardados.push(db.registros[index]);
     } else {
       // NUEVO REGISTRO
-      db.registros.push({
+      const nuevo = {
         ...regConContexto,
         creado_en: regConContexto.creado_en || ahora,
         actualizado_en: ahora
-      });
+      };
+      db.registros.push(nuevo);
+      guardados.push(nuevo);
     }
   });
 
   guardarDB(db);
+  sincronizar('guardar registro', () => api('/registros', { method: 'POST', body: { registros: guardados } }), actualizarCacheRegistros);
 }
 
 export function guardarRegistrosLote(nuevosRegistros, { reemplazar } = {}) {
@@ -221,18 +356,21 @@ export function guardarRegistrosLote(nuevosRegistros, { reemplazar } = {}) {
 
   const procesados = nuevosRegistros.map(r => ({
     ...r,
+    id_version: r.id_version || r.idVersion,
     creado_en: r.creado_en || ahora,
     actualizado_en: ahora
   }));
 
   db.registros.push(...procesados);
   guardarDB(db);
+  sincronizar('guardar costeo', () => api('/registros/lote', { method: 'POST', body: { registros: procesados, reemplazar } }), actualizarCacheRegistros);
 }
 
 export function eliminarRegistro(idRegistro) {
   const db = leerDB();
   db.registros = db.registros.filter(r => r.id_registro !== idRegistro);
   guardarDB(db);
+  sincronizar('eliminar registro', () => api(`/registros/${encodeURIComponent(idRegistro)}`, { method: 'DELETE' }));
 }
 
 // ===================== AGREGACIONES =====================
@@ -424,6 +562,7 @@ export function guardarCosteoDerivado(registroCosteo, desglose, { idVersion, are
   ];
 
   const db = leerDB();
+  const guardados = [];
 
   hijos.forEach(h => {
     if (!h.monto || h.monto <= 0) return;
@@ -453,9 +592,11 @@ export function guardarCosteoDerivado(registroCosteo, desglose, { idVersion, are
     const idx = db.registros.findIndex(r => r.id_registro === idRegistro);
     if (idx >= 0) db.registros[idx] = registroHijo;
     else db.registros.push(registroHijo);
+    guardados.push(registroHijo);
   });
 
   guardarDB(db);
+  if (guardados.length) sincronizar('guardar derivados', () => api('/registros', { method: 'POST', body: { registros: guardados } }), actualizarCacheRegistros);
 }
 
 // Cargar maestros iniciales desde data.js si no existen en localStorage
@@ -519,7 +660,7 @@ export function eliminarDeMaestro(tipo, idUnico) {
 
 export async function obtenerProductosOdoo() {
   try {
-    const res = await fetch('http://localhost:5000/api/maestros/productos');
+    const res = await fetch(`${API_URL}/api/maestros/productos`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -530,7 +671,7 @@ export async function obtenerProductosOdoo() {
 
 export async function obtenerClientesOdoo() {
   try {
-    const res = await fetch('http://localhost:5000/api/maestros/clientes');
+    const res = await fetch(`${API_URL}/api/maestros/clientes`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -541,7 +682,7 @@ export async function obtenerClientesOdoo() {
 
 export async function obtenerEmpleadosOdoo() {
   try {
-    const res = await fetch('http://localhost:5000/api/maestros/empleados');
+    const res = await fetch(`${API_URL}/api/maestros/empleados`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -552,7 +693,7 @@ export async function obtenerEmpleadosOdoo() {
 
 export async function obtenerCuentasOdoo() {
   try {
-    const res = await fetch('http://localhost:5000/api/maestros/cuentas');
+    const res = await fetch(`${API_URL}/api/maestros/cuentas`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -563,7 +704,7 @@ export async function obtenerCuentasOdoo() {
 
 export async function obtenerUsuariosOdoo() {
   try {
-    const res = await fetch('http://localhost:5000/api/maestros/usuarios');
+    const res = await fetch(`${API_URL}/api/maestros/usuarios`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -574,7 +715,7 @@ export async function obtenerUsuariosOdoo() {
 
 export async function obtenerFormulasOdoo() {
   try {
-    const respuesta = await fetch('http://localhost:5000/api/maestros/formulas');
+    const respuesta = await fetch(`${API_URL}/api/maestros/formulas`);
     if (!respuesta.ok) throw new Error('Error al conectar con el servidor local de fórmulas');
     
     const filasSQL = await respuesta.json();
@@ -611,7 +752,7 @@ export async function obtenerFormulasOdoo() {
 
 export async function obtenerUnidadesMedida() {
   try {
-    const respuesta = await fetch('http://localhost:5000/api/maestros/unidades');
+    const respuesta = await fetch(`${API_URL}/api/maestros/unidades`);
     if (!respuesta.ok) throw new Error('Error al obtener unidades de medida');
     return await respuesta.json();
   } catch (error) {
@@ -622,7 +763,7 @@ export async function obtenerUnidadesMedida() {
 
 export async function actualizarMaestroDB(tipo, id, datosNuevos) {
   try {
-    const respuesta = await fetch(`http://localhost:5000/api/maestros/${tipo}/${id}`, {
+    const respuesta = await fetch(`${API_URL}/api/maestros/${tipo}/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -645,7 +786,7 @@ export async function actualizarMaestroDB(tipo, id, datosNuevos) {
 
 export async function sincronizarConOdooDB() {
   try {
-    const respuesta = await fetch('http://localhost:5000/api/sincronizar/maestros', {
+    const respuesta = await fetch(`${API_URL}/api/sincronizar/maestros`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
@@ -664,7 +805,7 @@ export async function obtenerHistorialProducto(codigo, cliente) {
   try {
     const params = new URLSearchParams({ codigo });
     if (cliente) params.set('cliente', cliente);
-    const res = await fetch(`http://localhost:5000/api/maestros/productos/historial?${params.toString()}`);
+    const res = await fetch(`${API_URL}/api/maestros/productos/historial?${params.toString()}`);
     if (!res.ok) throw new Error('Error al conectar');
     return await res.json();
   } catch (error) {
@@ -675,7 +816,7 @@ export async function obtenerHistorialProducto(codigo, cliente) {
 
 export async function obtenerTipoCambioPromedio() {
   try {
-    const res = await fetch('http://localhost:5000/api/tipo-cambio/promedio');
+    const res = await fetch(`${API_URL}/api/tipo-cambio/promedio`);
     if (!res.ok) throw new Error('Error al conectar');
     const data = await res.json();
     return parseFloat(data.tipo_cambio) || 3.75;

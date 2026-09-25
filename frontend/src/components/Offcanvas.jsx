@@ -21,6 +21,8 @@ import { guardarRegistro } from '../data/store';
 // módulo) sobre lo que devuelve cada formulario específico, así los
 // formularios (RemuneracionesForm, UniformesForm, BaseRegistroForm) no
 // necesitan saber nada de versiones ni de áreas.
+const MODULOS_QUE_GUARDAN_SOLOS = ['Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas', 'Costeo de Embalajes'];
+
 export default function Offcanvas(props) {
   const { isOpen, onClose, categoria, idVersion, area, registroParaVer, modo, onGuardado } = props;
 
@@ -47,7 +49,11 @@ export default function Offcanvas(props) {
     // 2. Guardamos. 
     // IMPORTANTE: Quitamos "modulo: categoria" del segundo parámetro para que 
     // tu store.js no lo vuelva a sobreescribir a la fuerza.
-    guardarRegistro(listaPreparada, { idVersion, area });
+    // Los costeos ya guardan su lote completo (registro + derivados) por su cuenta;
+    // volver a guardarlos aquí duplicaría la escritura en el servidor y en el historial.
+    if (!MODULOS_QUE_GUARDAN_SOLOS.includes(categoria)) {
+      guardarRegistro(listaPreparada, { idVersion, area });
+    }
 
     if (typeof onGuardado === 'function') onGuardado();
     onClose();

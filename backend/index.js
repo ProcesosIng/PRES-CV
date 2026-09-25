@@ -2,10 +2,14 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 require('dotenv').config();
+const { crearRouterPresupuesto, inicializarEsquemaPresupuesto } = require('./presupuesto');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+// CORS_ORIGIN (separado por comas) limita qué dominios pueden llamar a la API; sin definir, se permite todo (desarrollo).
+const origenesPermitidos = (process.env.CORS_ORIGIN || '').split(',').map(o => o.trim()).filter(Boolean);
+app.use(cors(origenesPermitidos.length ? { origin: origenesPermitidos } : undefined));
+// Los costeos envían sus registros derivados en un solo lote: se sube el límite por defecto (100kb).
+app.use(express.json({ limit: '15mb' }));
 
 // Configuración de conexiones a las bases de datos leyendo tu .env actual
 const dbCorp = new Pool({
@@ -23,6 +27,9 @@ const dbLocal = new Pool({
   password: process.env.DB_LOCAL_PASSWORD,
   port: parseInt(process.env.DB_LOCAL_PORT || 5433),
 });
+
+// Versiones, registros (CRUD) e historial de cambios del presupuesto
+app.use('/api', crearRouterPresupuesto(dbLocal));
 
 // =====================================================================
 // PRUEBA DE CONEXIÓN DE DIAGNÓSTICO
@@ -785,6 +792,13 @@ app.listen(PORT, async () => {
   
   // Mantenemos solo el test de conexiones para que sepas si Odoo y la local responden al encender
   await probarConexiones();
+
+  try {
+    await inicializarEsquemaPresupuesto(dbLocal);
+    console.log('✅ Tablas de presupuesto listas (ppto_versiones, ppto_registros, ppto_auditoria)');
+  } catch (err) {
+    console.error('❌ No se pudieron crear las tablas de presupuesto:', err.message);
+  }
   
   console.log('✨ Servidor listo. La sincronización se hará de forma manual desde el sistema.');
 });

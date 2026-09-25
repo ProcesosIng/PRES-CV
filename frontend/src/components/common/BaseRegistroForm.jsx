@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {MESES } from '../../config/data';
+import { API_URL } from '../../config/api';
 
 // Diccionario normalizado a minúsculas para que coincida con .toLowerCase()
 const prefijosPorArea = {
@@ -110,7 +111,7 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
   useEffect(() => {
     async function cargarCuentasOdoo() {
       try {
-        const respuesta = await fetch('http://localhost:5000/api/maestros/cuentas');
+        const respuesta = await fetch(`${API_URL}/api/maestros/cuentas`);
         if (respuesta.ok) {
           const data = await respuesta.json();
           setListaCuentasOdoo(data || []);
@@ -126,7 +127,7 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
   useEffect(() => {
     async function cargarEmpleadosOdoo() {
       try {
-        const respuesta = await fetch('http://localhost:5000/api/maestros/empleados');
+        const respuesta = await fetch(`${API_URL}/api/maestros/empleados`);
         if (respuesta.ok) {
           const data = await respuesta.json();
           setListaEmpleadosOdoo(data || []);
