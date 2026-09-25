@@ -17,6 +17,8 @@ const MODULOS_EXCLUIDOS_DESTINO = ['Costeo de Crisoles', 'Costeo de Fundente', '
 const MODULOS_DESTINO_DISPONIBLES = Object.keys(configModulos || {}).filter(m => !MODULOS_EXCLUIDOS_DESTINO.includes(m));
 const CUENTA_MATERIA_PRIMA = '6121000 - Materias primas - Materias primas';
 const CUENTA_ENVASES = '6141000 - Envases y embalajes - Envases';
+// Cuenta FIJA según el módulo destino: envases -> 6141000; materias primas e insumos -> 6121000.
+const cuentaSegunModulo = (modulo) => (modulo === 'Envases y Embalajes' ? CUENTA_ENVASES : CUENTA_MATERIA_PRIMA);
 
 // ==========================================
 // HELPERS
@@ -964,7 +966,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
         if (mat.insumo && (!mat.productoAsociado || mat.productoAsociado === nombreProd)) {
           const factor = mat.tipoCalculo === 'porcentaje' ? (parseFloat(mat.valor) / 100 || 0) : (parseFloat(mat.valor) || 0);
           let costoMatProd = 0;
-          const cuentaConPrefijo = formatearCuentaConPrefijo92(CUENTA_MATERIA_PRIMA);
+          const cuentaConPrefijo = formatearCuentaConPrefijo92(cuentaSegunModulo(mat.moduloDestino || 'Materias Primas'));
 
           MESES.forEach((mes, iM) => {
             const mesNum = String(iM + 1).padStart(2, '0');
@@ -1009,7 +1011,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
       suministros.forEach((sum, sIdx) => {
         if (sum.insumo && (!sum.productoAsociado || sum.productoAsociado === nombreProd)) {
           let costoSumProd = 0;
-          const cuentaSumPrefijo = formatearCuentaConPrefijo92(CUENTA_ENVASES);
+          const cuentaSumPrefijo = formatearCuentaConPrefijo92(cuentaSegunModulo(sum.moduloDestino || 'Envases y Embalajes'));
 
           MESES.forEach((mes, iM) => {
             const mesNum = String(iM + 1).padStart(2, '0');
@@ -1514,8 +1516,42 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
             })}
           </div>
 
-          {/* 3.1. SUMINISTROS embalaje) */}
-          <div>Embalaje (Logística): S/ {datosFinancierosGlobales.totalPlanta.embalaje.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+          {/* EMBALAJE (SOLO LECTURA — se costea en Logística) */}
+          <div className="form-section" style={{ background: '#fdf4ff', padding: '12px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+            <div className="form-section-title" style={{ fontWeight: 700, color: '#6b21a8', marginBottom: '8px' }}>Embalaje (Costeo de Logística — solo lectura)</div>
+            <div style={{ fontSize: '11px', color: '#7e22ce', background: 'white', padding: '8px', borderRadius: '4px', marginBottom: '10px', border: '1px solid #e9d5ff' }}>
+              El embalaje (paletas, zuncho, grapas, film) se costea en el módulo "Costeo de Embalajes" de Logística. Aquí solo se muestra el costo ya calculado, por producto.
+            </div>
+            {productosSeleccionados.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>Selecciona productos arriba para ver su costo de embalaje.</div>
+            ) : (
+              <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                    <th style={{ padding: '4px' }}>Producto</th>
+                    <th style={{ padding: '4px', textAlign: 'right' }}>Costo Unit. Embalaje</th>
+                    <th style={{ padding: '4px', textAlign: 'right' }}>Costo Total Anual</th>
+                    <th style={{ padding: '4px', textAlign: 'center' }}>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {datosFinancierosGlobales.filas.map(f => (
+                    <tr key={f.prod} style={{ borderTop: '1px solid #e9d5ff' }}>
+                      <td style={{ padding: '4px', fontWeight: 600 }}>{f.prod}</td>
+                      <td style={{ padding: '4px', textAlign: 'right' }}>S/ {(embalajePorProducto[f.prod] || 0).toFixed(4)}</td>
+                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 700 }}>S/ {f.embalaje.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ padding: '4px', textAlign: 'center' }}>
+                        {f.embalajePendiente
+                          ? <span style={{ color: '#dc2626', fontWeight: 700 }}>⚠ Pendiente</span>
+                          : <span style={{ color: '#16a34a', fontWeight: 700 }}>✓ Costeado</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
 
           
 
