@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MESES } from '../../config/data';
-import { listarLineasForecastParaEmbalaje, guardarRegistrosLote, obtenerProductosOdoo, obtenerCuentasOdoo } from '../../data/store';
+import { listarLineasForecastParaEmbalaje, guardarRegistrosLote, obtenerProductosOdoo, obtenerCuentasOdoo, obtenerConfigEmbalajeGuardada, LINEAS_PRODUCCION_EMBALAJE } from '../../data/store';
 
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = Array.from({ length: 5 }, (_, i) => (ANIO_ACTUAL - 1 + i).toString());
-const LINEAS_NEGOCIO = ['Fundente', 'Crisoles de Arcilla', 'Copelas'];
 
 // Cuenta de embalaje con prefijo 98 (Logística): conserva los últimos 7 dígitos del código base.
 const formatearCuentaConPrefijo98 = (codigoBase, descripcion) => {
@@ -32,6 +31,8 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
   const isSoloLectura = modo === 'ver';
 
   const [anioSel, setAnioSel] = useState(ANIO_ACTUAL.toString());
+  // Línea de producción que se está costeando: cada una tiene su propia config y sus propios registros
+  const [lineaSel, setLineaSel] = useState('');
   const [capacidadPaletaLocal, setCapacidadPaletaLocal] = useState('500');
   const [capacidadPaletaExterior, setCapacidadPaletaExterior] = useState('500');
   const [insumosEmbalaje, setInsumosEmbalaje] = useState([_crearInsumoVacio()]);
@@ -47,29 +48,38 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
     return () => { activo = false; };
   }, []);
 
-  // Todas las líneas del forecast (producto + cliente + zona) de las 3 líneas de producción
+  // Líneas del forecast (producto + cliente + zona) SOLO de la línea de producción seleccionada
   const lineasForecast = useMemo(() => {
-    const todas = listarLineasForecastParaEmbalaje({ idVersion, lineasNegocio: LINEAS_NEGOCIO });
+    if (!lineaSel) return [];
+    const todas = listarLineasForecastParaEmbalaje({ idVersion, lineasNegocio: [lineaSel] });
     return todas.filter(f => {
       const anioReg = String(f.anio_proyeccion || ANIO_ACTUAL);
       return anioReg === String(anioSel);
     });
-  }, [idVersion, anioSel]);
+  }, [idVersion, anioSel, lineaSel]);
 
-  // Carga inicial: si venimos a editar un registro puntual, precargamos la config global usada
+  const aplicarConfig = (config) => {
+    setCapacidadPaletaLocal(config?.capacidadPaletaLocal ?? '500');
+    setCapacidadPaletaExterior(config?.capacidadPaletaExterior ?? '500');
+    setInsumosEmbalaje(Array.isArray(config?.insumos) && config.insumos.length > 0 ? config.insumos : [_crearInsumoVacio()]);
+  };
+
+  // Carga inicial: si venimos a editar un registro puntual, precargamos su línea, año y config
   useEffect(() => {
     if (registro) {
       const dc = registro.detalle_columnas || {};
       if (dc.anio_proyeccion) setAnioSel(dc.anio_proyeccion.toString());
-      if (dc.config_global) {
-        setCapacidadPaletaLocal(dc.config_global.capacidadPaletaLocal ?? '500');
-        setCapacidadPaletaExterior(dc.config_global.capacidadPaletaExterior ?? '500');
-        if (Array.isArray(dc.config_global.insumos) && dc.config_global.insumos.length > 0) {
-          setInsumosEmbalaje(dc.config_global.insumos);
-        }
-      }
+      if (dc.unidad_negocio) setLineaSel(dc.unidad_negocio);
+      if (dc.config_global) aplicarConfig(dc.config_global);
     }
   }, [registro]);
+
+  // Al cambiar de línea o de año, se recupera lo que ya se guardó para esa línea (o valores por defecto)
+  const cambiarLineaOAnio = (nuevaLinea, nuevoAnio) => {
+    setLineaSel(nuevaLinea);
+    setAnioSel(nuevoAnio);
+    if (nuevaLinea) aplicarConfig(obtenerConfigEmbalajeGuardada({ idVersion, anio: nuevoAnio, unidadNegocio: nuevaLinea }));
+  };
 
   const volumenPorLinea = (linea) => {
     const factor = obtenerFactorPorUnidad(linea.um);
@@ -121,10 +131,13 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
   };
 
   const handleGuardar = () => {
-    if (calculoPorLinea.length === 0) return alert('No hay líneas de forecast (Fundente/Crisoles/Copelas) para este año.');
+    if (!lineaSel) return alert('Selecciona la línea de producción a costear.');
+    if (calculoPorLinea.length === 0) return alert(`No hay líneas de forecast de ${lineaSel} para ${anioSel}.`);
 
     const configGlobal = { capacidadPaletaLocal, capacidadPaletaExterior, insumos: insumosEmbalaje };
-    const idLoteBase = `LOTE-EMB-${anioSel}-${Date.now()}`;
+    // Lote fijo por línea + año: al volver a guardar se reemplaza solo el costeo de esa línea
+    const areaDestino = LINEAS_PRODUCCION_EMBALAJE.find(l => l.unidadNegocio === lineaSel)?.area || '';
+    const idLoteBase = `LOTE-EMB-${idVersion}-${lineaSel}-${anioSel}`;
 
     const registrosAGuardar = calculoPorLinea.map((linea, idx) => {
       const idRegistro = `EMB-${linea.id_registro}`; // 1 registro de embalaje por línea de forecast
@@ -157,6 +170,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
           costo_unitario_embalaje: linea.costoUnitario,
           costo_total_anual: linea.costoTotal,
           id_registro_forecast: linea.id_registro,
+          area_produccion_destino: areaDestino,
           config_global: configGlobal,
         },
         totales: { costo_total: linea.costoTotal },
@@ -164,7 +178,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
       };
     });
 
-    guardarRegistrosLote(registrosAGuardar, { reemplazar: idLoteBase });
+    guardarRegistrosLote(registrosAGuardar);
     if (typeof onGuardar === 'function') onGuardar(registrosAGuardar);
     if (typeof onCancelar === 'function') onCancelar();
   };
@@ -176,11 +190,18 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
 
           {/* 1. AÑO Y CAPACIDAD POR PALETA */}
           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: '10px' }}>1. Año y Capacidad por Paleta</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+            <div style={{ fontWeight: 700, color: '#1e293b', marginBottom: '10px' }}>1. Línea de Producción, Año y Capacidad por Paleta</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr', gap: '10px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#7c3aed' }}>LÍNEA A COSTEAR</label>
+                <select value={lineaSel} onChange={e => cambiarLineaOAnio(e.target.value, anioSel)} disabled={!!registro} style={{ width: '100%', padding: '6px', border: '1px solid #7c3aed', borderRadius: '4px', background: '#f5f3ff', fontWeight: 600 }}>
+                  <option value="">— Seleccionar —</option>
+                  {LINEAS_PRODUCCION_EMBALAJE.map(l => <option key={l.unidadNegocio} value={l.unidadNegocio}>{l.unidadNegocio}</option>)}
+                </select>
+              </div>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb' }}>AÑO</label>
-                <select value={anioSel} onChange={e => setAnioSel(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px' }}>
+                <select value={anioSel} onChange={e => cambiarLineaOAnio(lineaSel, e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px' }}>
                   {ANIOS_DISPONIBLES.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
@@ -232,7 +253,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
           {/* 3. RESULTADO POR LÍNEA DE FORECAST */}
           <div style={{ background: 'white', border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
             <div style={{ background: '#f8fafc', padding: '10px 14px', fontWeight: 700, color: '#1e293b', borderBottom: '1px solid #cbd5e1' }}>
-              3. Costeo por Línea (Producto + Cliente + Zona) — {calculoPorLinea.length} registros
+              3. Costeo por Línea (Producto + Cliente + Zona){lineaSel ? ` — ${lineaSel}` : ''} — {calculoPorLinea.length} registros
             </div>
             <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
               <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
@@ -250,7 +271,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
                 </thead>
                 <tbody>
                   {calculoPorLinea.length === 0 ? (
-                    <tr><td colSpan={8} style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>No hay líneas de forecast para este año.</td></tr>
+                    <tr><td colSpan={8} style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontStyle: 'italic' }}>{lineaSel ? `No hay líneas de forecast de ${lineaSel} para este año.` : 'Selecciona arriba la línea de producción a costear.'}</td></tr>
                   ) : calculoPorLinea.map(l => (
                     <tr key={l.id_registro} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '5px 6px', fontWeight: 600 }}>{l.producto}</td>
@@ -271,7 +292,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
           </div>
 
           <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', color: '#166534', fontSize: '16px' }}>
-            <span>COSTO TOTAL DE EMBALAJE ({anioSel}):</span>
+            <span>COSTO TOTAL DE EMBALAJE{lineaSel ? ` — ${lineaSel}` : ''} ({anioSel}):</span>
             <span>S/ {totalGeneral.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
           </div>
 

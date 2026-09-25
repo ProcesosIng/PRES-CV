@@ -507,7 +507,7 @@ export default function CosteoCopelasForm({ registro, onGuardar, onCancelar, mod
   };
 
   const embalajePorProducto = useMemo(
-    () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel }),
+    () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel, unidadNegocio: 'Copelas' }),
     [idVersion, anioSel]
   );
 

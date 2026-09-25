@@ -214,6 +214,9 @@ export function guardarRegistrosLote(nuevosRegistros, { reemplazar } = {}) {
   } else {
     const idLoteTarget = nuevosRegistros[0].id_lote;
     if (idLoteTarget) db.registros = db.registros.filter(r => r.id_lote !== idLoteTarget);
+    // Evita duplicados si un registro con el mismo id ya existía en otro lote
+    const idsNuevos = new Set(nuevosRegistros.map(r => r.id_registro).filter(Boolean));
+    db.registros = db.registros.filter(r => !idsNuevos.has(r.id_registro));
   }
 
   const procesados = nuevosRegistros.map(r => ({
@@ -311,9 +314,31 @@ export function listarLineasForecastParaEmbalaje({ idVersion, lineasNegocio }) {
     .filter(f => !lineasNegocio || lineasNegocio.includes(f.unidad_negocio));
 }
 
+// Logística costea el embalaje por separado para cada línea de producción
+// (unidad de negocio del forecast). Cada costeo de producción solo lee la suya.
+export const LINEAS_PRODUCCION_EMBALAJE = [
+  { unidadNegocio: 'Crisoles de Arcilla', area: 'Producción Crisoles' },
+  { unidadNegocio: 'Fundente', area: 'Producción Fundente' },
+  { unidadNegocio: 'Copelas', area: 'Producción Copelas' },
+];
+
+// Última configuración guardada (capacidades + insumos) del embalaje de una línea/año.
+export function obtenerConfigEmbalajeGuardada({ idVersion, anio, unidadNegocio }) {
+  const db = leerDB();
+  const regs = (db.registros || []).filter(r => {
+    const dc = r.detalle_columnas || {};
+    return r.id_version === idVersion && r.modulo === 'Costeo de Embalajes'
+      && String(dc.anio_proyeccion) === String(anio)
+      && dc.unidad_negocio === unidadNegocio && dc.config_global;
+  });
+  if (regs.length === 0) return null;
+  regs.sort((a, b) => String(b.actualizado_en || '').localeCompare(String(a.actualizado_en || '')));
+  return regs[0].detalle_columnas.config_global;
+}
+
 // Costo de embalaje YA CALCULADO por Logística, por cada línea de forecast (producto+cliente+zona).
-// Los costeos de producción (Crisoles/Fundente/Copelas) SOLO LEEN esto.
-export function obtenerCostosEmbalajePorLinea({ idVersion, anio }) {
+// Los costeos de producción (Crisoles/Fundente/Copelas) SOLO LEEN esto, filtrado por su unidad de negocio.
+export function obtenerCostosEmbalajePorLinea({ idVersion, anio, unidadNegocio }) {
   const db = leerDB();
   const mapa = {}; // clave: id_registro_forecast -> costo
   (db.registros || [])
@@ -321,6 +346,7 @@ export function obtenerCostosEmbalajePorLinea({ idVersion, anio }) {
     .forEach(r => {
       const dc = r.detalle_columnas || {};
       if (anio && String(dc.anio_proyeccion) !== String(anio)) return;
+      if (unidadNegocio && dc.unidad_negocio !== unidadNegocio) return;
       const idRef = dc.id_registro_forecast;
       if (!idRef) return;
       mapa[idRef] = {
@@ -336,8 +362,8 @@ export function obtenerCostosEmbalajePorLinea({ idVersion, anio }) {
 
 // Agregado por PRODUCTO (promedio ponderado por volumen entre todas sus líneas/zonas/clientes).
 // Esto es lo que consumen Fundente/Crisoles/Copelas: un solo costo unitario de embalaje por producto.
-export function obtenerCostoEmbalajePorProducto({ idVersion, anio }) {
-  const porLinea = obtenerCostosEmbalajePorLinea({ idVersion, anio });
+export function obtenerCostoEmbalajePorProducto({ idVersion, anio, unidadNegocio }) {
+  const porLinea = obtenerCostosEmbalajePorLinea({ idVersion, anio, unidadNegocio });
   const acumulado = {}; // producto -> { volumen, costoTotal }
   Object.values(porLinea).forEach(l => {
     if (!acumulado[l.producto]) acumulado[l.producto] = { volumen: 0, costoTotal: 0 };
@@ -559,6 +585,7 @@ export async function obtenerFormulasOdoo() {
 
       if (!formulasAgrupadas[idUnicoFormula]) {
         formulasAgrupadas[idUnicoFormula] = {
+          id: idUnicoFormula,
           producto: fila.producto_final,
           codigo: fila.codigo_formula || `BOM-${fila.bom_id}`,
           cantidad_base: fila.cantidad_base || 1,

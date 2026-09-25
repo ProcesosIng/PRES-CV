@@ -532,7 +532,7 @@ export default function CosteoFundenteForm({ registro, onGuardar, onCancelar, mo
   };
 
   const embalajePorProducto = useMemo(
-  () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel }),
+  () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel, unidadNegocio: 'Fundente' }),
     [idVersion, anioSel]
   );
 

@@ -225,26 +225,31 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
       };
     }
 
-  // Autocarga de la lista de materiales (BOM) agrupada por producto.
-  // Crisoles no tiene concepto de sachet/granel (eso es de Fundente): esta función solo
-  // carga materiales, y los envases se siguen ingresando manualmente en la sección 3.
-  const cargarFormulaDeProducto = (nombreProducto) => {
-    if (!nombreProducto) return { materialesNuevos: [] };
+  // Lista de materiales (BOM): ya NO se asigna automáticamente al marcar un producto.
+  // El usuario elige en el selector de cada producto qué lista de materiales usar.
+  const nombreFormula = (f) => String(f.producto_terminado || f.nombre_producto || f.producto || '').trim();
+  const idDeFormula = (f) => String(f.id ?? f.bom_id ?? f.codigo_formula ?? f.codigo ?? '');
 
-    const prodLimpio = nombreProducto.trim().toLowerCase();
-    const formulaEncontrada = formulasBD.find(f => {
-      const nombreEnBd = String(f.producto_terminado || f.nombre_producto || f.producto || '').trim().toLowerCase();
-      return nombreEnBd === prodLimpio || prodLimpio.includes(nombreEnBd) || nombreEnBd.includes(prodLimpio);
+  // Listas cuyo producto coincide con el producto costeado van primero; el resto se ofrece aparte.
+  const formulasParaProducto = (nombreProducto) => {
+    const prodLimpio = String(nombreProducto || '').trim().toLowerCase();
+    const sugeridas = [];
+    const otras = [];
+    formulasBD.forEach(f => {
+      const nombreEnBd = nombreFormula(f).toLowerCase();
+      const coincide = nombreEnBd && (nombreEnBd === prodLimpio || prodLimpio.includes(nombreEnBd) || nombreEnBd.includes(prodLimpio));
+      (coincide ? sugeridas : otras).push(f);
     });
+    return { sugeridas, otras };
+  };
 
-    if (!formulaEncontrada || !Array.isArray(formulaEncontrada.materia_prima) || formulaEncontrada.materia_prima.length === 0) {
-      return { materialesNuevos: [_crearItemVacio('insumo', false, nombreProducto)] };
-    }
+  const materialesDesdeFormula = (nombreProducto, formula) => {
+    const insumos = Array.isArray(formula?.materia_prima) ? formula.materia_prima : [];
+    const codigoBOM = formula.codigo_formula || formula.codigo || formula.bom_id || 'BOM';
+    // La cantidad de la BOM es para `cantidad_base` unidades: el ratio es por 1 unidad producida.
+    const cantidadBase = parseFloat(formula.cantidad_base) > 0 ? parseFloat(formula.cantidad_base) : 1;
 
-    const codigoBOM = formulaEncontrada.codigo_formula || formulaEncontrada.codigo || formulaEncontrada.bom_id || 'BOM-Auto';
-    const listaMateriales = [];
-
-    formulaEncontrada.materia_prima.forEach((ins, idx) => {
+    return insumos.map((ins, idx) => {
       const nombreInsumo = Array.isArray(ins.insumo) ? String(ins.insumo[1]) : String(ins.insumo || ins.nombre || 'Insumo');
       const insumoLimpio = nombreInsumo.trim().toLowerCase();
 
@@ -256,24 +261,46 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
       const costoMaestro = productoEnMaestro ? (parseFloat(productoEnMaestro.costo) > 0 ? parseFloat(productoEnMaestro.costo) : parseFloat(productoEnMaestro.precio_venta) || 0) : 0;
       const costoDeFormula = parseFloat(ins.costo_estandar || ins.costo || ins.costo_unitario || 0);
       const costoFinal = costoDeFormula > 0 ? costoDeFormula : costoMaestro;
+      const cantidad = parseFloat(ins.cantidad_por_unidad || ins.cantidad || 0) || 0;
 
-      listaMateriales.push({
-        id: `auto-${Date.now()}-${idx}-${Math.random()}`,
+      return {
+        id: `bom-${Date.now()}-${idx}-${Math.random()}`,
         productoAsociado: nombreProducto,
+        idFormula: idDeFormula(formula),
         codigoFormula: codigoBOM,
         insumo: nombreInsumo,
         cuenta: '',
         moduloDestino: 'Materias Primas',
         udm: String(ins.unidad_medida || ins.unidad || 'kg'),
         tipoCalculo: 'ratio',
-        valor: String(ins.cantidad_por_unidad || ins.cantidad || 0),
+        valor: String(+(cantidad / cantidadBase).toFixed(6)),
         porcentajeAsignacionMeses: MESES.reduce((acc, m) => ({ ...acc, [m]: '100' }), {}),
         costoUnitario: costoFinal > 0 ? costoFinal.toFixed(4) : '0',
         usarParticipacion: false
-      });
+      };
     });
+  };
 
-    return { materialesNuevos: listaMateriales };
+  // Lista elegida para un producto (se deduce de sus materiales cargados)
+  const formulaSeleccionadaDe = (nombreProducto) => {
+    const item = materiales.find(m => m.productoAsociado === nombreProducto && (m.idFormula || m.codigoFormula));
+    if (!item) return '';
+    if (item.idFormula) return item.idFormula;
+    const f = formulasBD.find(x => (x.codigo_formula || x.codigo) === item.codigoFormula);
+    return f ? idDeFormula(f) : '';
+  };
+
+  // Cambiar la lista reemplaza los materiales que venían de una BOM (y filas vacías);
+  // los insumos agregados manualmente se conservan.
+  const seleccionarFormula = (nombreProducto, idFormula) => {
+    const formula = formulasBD.find(f => idDeFormula(f) === idFormula);
+    setMateriales(prev => {
+      const resto = prev.filter(m => !(m.productoAsociado === nombreProducto && (m.idFormula || m.codigoFormula || !m.insumo)));
+      const nuevos = formula ? materialesDesdeFormula(nombreProducto, formula) : [];
+      const quedanDelProducto = resto.some(m => m.productoAsociado === nombreProducto);
+      if (nuevos.length === 0 && !quedanDelProducto) nuevos.push(_crearItemVacio('insumo', false, nombreProducto));
+      return [...resto, ...nuevos];
+    });
   };
 
   const adaptarModulosLegacy = (lista) => (lista || []).map(item => ({
@@ -422,8 +449,8 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
     } else {
       nuevosSel.push(nombreProd);
 
-      const resultadoFormula = cargarFormulaDeProducto(nombreProd);
-      setMateriales(prev => [...prev, ...resultadoFormula.materialesNuevos]);
+      // Sin autocarga: se agrega una fila vacía y el usuario elige la lista de materiales en el selector.
+      setMateriales(prev => [...prev, _crearItemVacio('insumo', false, nombreProd)]);
 
       const anioTarget = String(anioSel).trim();
       const registrosDelProd = forecastCrisoles.filter(r => {
@@ -563,7 +590,7 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
   };
 
   const embalajePorProducto = useMemo(
-    () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel }),
+    () => obtenerCostoEmbalajePorProducto({ idVersion, anio: anioSel, unidadNegocio: 'Crisoles de Arcilla' }),
     [idVersion, anioSel]
   );
 
@@ -1196,13 +1223,13 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
             })}
           </div>
 
-          {/* 2. MATERIALES (PROCESO 1) - AGRUPADO POR PRODUCTO, CON AUTOCARGA DE BOM */}
+          {/* 2. MATERIALES (PROCESO 1) - AGRUPADO POR PRODUCTO, CON SELECTOR DE LISTA DE MATERIALES */}
           <div className="form-section" style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <div className="form-section-title" style={{ fontWeight: 700, color: '#1e293b', marginBottom: '10px' }}>2. Materiales (Proceso 1 - Materias Primas e Insumos)</div>
 
-            {materiales.length === 0 && <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: '#64748b' }}>Selecciona un producto arriba para cargar su lista de materiales.</div>}
+            {materiales.length === 0 && productosSeleccionados.length === 0 && <div style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: '#64748b' }}>Selecciona un producto arriba y luego elige su lista de materiales.</div>}
 
-            {[...new Set(materiales.map(m => m.productoAsociado))].map(prodAsociado => {
+            {[...new Set([...productosSeleccionados, ...materiales.map(m => m.productoAsociado)])].map(prodAsociado => {
               const itemsDelGrupo = materiales.filter(m => m.productoAsociado === prodAsociado);
               const esGeneral = !prodAsociado;
               const prodCants = calcularProdPorProducto(prodAsociado);
@@ -1214,6 +1241,28 @@ export default function CosteoCrisolesForm({ registro, onGuardar, onCancelar, mo
                     <span style={{ fontWeight: 'bold', color: esGeneral ? '#475569' : '#1e3a8a', fontSize: '12px' }}>
                       📦 {prodAsociado || 'Insumos Generales'} — Vol. Proyectado: {volumenProyectado.toLocaleString()} und
                     </span>
+                    {!esGeneral && (() => {
+                      const { sugeridas, otras } = formulasParaProducto(prodAsociado);
+                      const etiqueta = f => `${f.codigo_formula || f.codigo || 'BOM'} — ${nombreFormula(f)}${parseFloat(f.cantidad_base) > 1 ? ` (base ${f.cantidad_base})` : ''}`;
+                      return (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#1e3a8a', fontWeight: 600, marginLeft: 'auto' }}>
+                          Lista de materiales:
+                          <select value={formulaSeleccionadaDe(prodAsociado)} onChange={e => seleccionarFormula(prodAsociado, e.target.value)} style={{ padding: '3px 6px', border: '1px solid #93c5fd', borderRadius: '4px', fontSize: '11px', maxWidth: '280px' }}>
+                            <option value="">— Manual (sin lista) —</option>
+                            {sugeridas.length > 0 && (
+                              <optgroup label="Para este producto">
+                                {sugeridas.map(f => <option key={idDeFormula(f)} value={idDeFormula(f)}>{etiqueta(f)}</option>)}
+                              </optgroup>
+                            )}
+                            {otras.length > 0 && (
+                              <optgroup label="Otras listas">
+                                {otras.map(f => <option key={idDeFormula(f)} value={idDeFormula(f)}>{etiqueta(f)}</option>)}
+                              </optgroup>
+                            )}
+                          </select>
+                        </label>
+                      );
+                    })()}
                     <button type="button" onClick={() => setMateriales([...materiales, _crearItemVacio('insumo', false, prodAsociado)])} style={{ background: '#2563eb', color: 'white', border: 'none', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
                       + Agregar Insumo Manual
                     </button>
