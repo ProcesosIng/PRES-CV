@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PROCESOS_PRODUCTIVOS, MESES } from '../../config/data';
 import { obtenerEmpleadosOdoo, obtenerProductosOdoo, obtenerCuentasOdoo } from '../../data/store';
+import { formatearCuentaContable } from '../../config/cuentas';
 
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = [ANIO_ACTUAL - 1, ANIO_ACTUAL, ANIO_ACTUAL + 1, ANIO_ACTUAL + 2].map(String);
@@ -312,7 +313,7 @@ export default function UniformesForm({ registro, onGuardar, onCancelar, modo, a
           empleado_dni: datosAuto['auto-dni'],
           empleado_nombre: nombreEmpleado,
           detalle_columnas: {
-            cuenta_afectada: codigoFinal,
+            cuenta_afectada: formatearCuentaContable(codigoFinal, listaCuentas),
             epp_nombre: fila.producto,
             cantidad: cantidadNum,
             proceso: proceso,
@@ -323,7 +324,7 @@ export default function UniformesForm({ registro, onGuardar, onCancelar, modo, a
           desglose_contable: [
             {
               id: `cta-${fechaIndex}-${prodIndex}`,
-              cuenta: codigoFinal,
+              cuenta: formatearCuentaContable(codigoFinal, listaCuentas),
               monto: costoTotalItem.toFixed(2)
             }
           ],

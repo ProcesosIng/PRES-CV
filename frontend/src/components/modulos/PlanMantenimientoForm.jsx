@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MESES, PROCESOS_PRODUCTIVOS } from '../../config/data';
 import { obtenerCuentasOdoo } from '../../data/store';
+import { formatearCuentaContable } from '../../config/cuentas';
 
 const FRECUENCIAS = ['Mensual', 'Trimestral', 'Semestral', 'Anual'];
 
@@ -343,7 +344,7 @@ export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar,
     const idRegistroBaseMnt = registro ? registro.id_registro : `MNT-${timestamp}`;
     const idLote = registro ? (registro.id_lote || idRegistroBaseMnt) : `LOTE-MIXTO-${timestamp}`;
 
-    const cuentaFinalMnt = aplicarPrefijoCuenta(cuenta);
+    const cuentaFinalMnt = formatearCuentaContable(aplicarPrefijoCuenta(cuenta), listaCuentas);
     const registrosAGuardar = [];
 
     // 1. Generar registros de MANTENIMIENTO
@@ -415,7 +416,7 @@ export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar,
           detalle_columnas: {
             tipo_activo: 'Activo Nuevo',
             numero_cuenta: cuentaDepFinal,
-            cuenta_afectada: cuentaDepFinal,
+            cuenta_afectada: formatearCuentaContable(cuentaDepFinal, listaCuentas),
             area: areaSel,
             proceso,
             descripcion_cuenta: descripcionActivo,
@@ -431,7 +432,7 @@ export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar,
           totales: { costo_total: depreciacionMensualCalculada },
           desglose_contable: [{
             id: `cta-dep-${idx}`,
-            cuenta: cuentaDepFinal,
+            cuenta: formatearCuentaContable(cuentaDepFinal, listaCuentas),
             monto: depreciacionMensualCalculada.toFixed(2)
           }],
         });

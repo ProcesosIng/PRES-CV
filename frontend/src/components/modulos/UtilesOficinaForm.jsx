@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { PROCESOS_PRODUCTIVOS, MESES } from '../../config/data';
 import { obtenerEmpleadosOdoo, obtenerProductosOdoo, obtenerCuentasOdoo } from '../../data/store';
+import { formatearCuentaContable } from '../../config/cuentas';
 
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = [ANIO_ACTUAL - 1, ANIO_ACTUAL, ANIO_ACTUAL + 1, ANIO_ACTUAL + 2].map(String);
@@ -118,7 +119,7 @@ export default function UtilesOficinaForm({ registro, onGuardar, onCancelar, mod
       
       // Detectar tipo según la cuenta guardada o descripción
       const cuentaGuardada = dc.cuenta_afectada || '';
-      const tipoDetectado = cuentaGuardada.endsWith('6562000') ? 'aseo' : 'oficina';
+      const tipoDetectado = cuentaGuardada.includes('6562000') ? 'aseo' : 'oficina';
 
       setFilasItems([
         {
@@ -333,7 +334,7 @@ export default function UtilesOficinaForm({ registro, onGuardar, onCancelar, mod
         const costoTotalItem = cantidadNum * precioNum;
 
         const cuentaBase = fila.tipo === 'aseo' ? '6562000' : '6561000';
-        const cuentaFinal = `${prefijoArea}${cuentaBase}`;
+        const cuentaFinal = formatearCuentaContable(`${prefijoArea}${cuentaBase}`, listaCuentas);
 
         const idFinalRegistro = registro ? registro.id_registro : `REG-UTI-${Date.now()}-${fechaIndex}-${prodIndex}`;
         const idLoteFinal = registro ? registro.id_lote : `LOTE-UTI-${Date.now()}`;

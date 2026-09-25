@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MESES, PROCESOS_PRODUCTIVOS } from '../../config/data';
 import { obtenerCuentasOdoo } from '../../data/store';
+import { formatearCuentaContable } from '../../config/cuentas';
 
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = [ANIO_ACTUAL - 1, ANIO_ACTUAL, ANIO_ACTUAL + 1, ANIO_ACTUAL + 2, ANIO_ACTUAL + 3].map(String);
@@ -250,7 +251,7 @@ export default function PlanDepreciacionForm({ registro, onGuardar, onCancelar, 
           detalle_columnas: {
             tipo_activo: tipoActivo,
             numero_cuenta: cuentaFinal,
-            cuenta_afectada: cuentaFinal,
+            cuenta_afectada: formatearCuentaContable(cuentaFinal, listaCuentas),
             area: areaSel, 
             proceso,
             descripcion_cuenta: descripcionCuenta,
@@ -266,7 +267,7 @@ export default function PlanDepreciacionForm({ registro, onGuardar, onCancelar, 
           totales: { costo_total: depreciacionMensualAuto },
           desglose_contable: [{
             id: `cta-${idx}`,
-            cuenta: cuentaFinal,
+            cuenta: formatearCuentaContable(cuentaFinal, listaCuentas),
             monto: depreciacionMensualAuto.toFixed(2)
           }],
         });
@@ -294,7 +295,7 @@ export default function PlanDepreciacionForm({ registro, onGuardar, onCancelar, 
             detalle_columnas: {
               tipo_activo: tipoActivo,
               numero_cuenta: cuentaFinal,
-              cuenta_afectada: cuentaFinal,
+              cuenta_afectada: formatearCuentaContable(cuentaFinal, listaCuentas),
               area: areaSel, 
               proceso,
               descripcion_cuenta: descripcionCuenta,
@@ -308,7 +309,7 @@ export default function PlanDepreciacionForm({ registro, onGuardar, onCancelar, 
             totales: { costo_total: montoMes },
             desglose_contable: [{
               id: `cta-${idx}`,
-              cuenta: cuentaFinal,
+              cuenta: formatearCuentaContable(cuentaFinal, listaCuentas),
               monto: montoMes.toFixed(2)
             }],
           });
