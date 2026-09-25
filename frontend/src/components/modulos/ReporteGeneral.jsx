@@ -269,7 +269,8 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       'Materiales Auxiliares y Suministros',
       'Envases y Embalajes',
       'Costeo de Crisoles',
-      'Costeo de Fundente'
+      'Costeo de Fundente',
+      'Costeo de Copelas'
     ];
 
     const filasPlan = [];
@@ -296,7 +297,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       const modulo = reg.modulo || 'General';
       const cuenta = dc.cuenta_afectada || dc.cuenta || dc.numero_cuenta || 'S/C';
 
-      if (modulo === 'Costeo de Crisoles' || modulo === 'Costeo de Fundente') {
+      if (modulo === 'Costeo de Crisoles' || modulo === 'Costeo de Fundente' || modulo === 'Costeo de Copelas') {
         const listaInsumos = [...(reg.materiales || []), ...(reg.suministros || [])];
 
         listaInsumos.forEach(item => {
@@ -452,7 +453,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
 
   // 4. Plan de Producción
   const resumenProduccion = useMemo(() => {
-    const modulosProd = ['Costeo de Crisoles', 'Costeo de Fundente'];
+    const modulosProd = ['Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas'];
     let filtrados = registrosFiltrados.filter(r => modulosProd.includes(r.modulo));
 
     if (filtroPersona) {

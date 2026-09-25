@@ -11,6 +11,7 @@ import UtilesOficinaFila from './modulos/UtilesOficinaTabla';
 import ForecastComercialFila from './modulos/ForecastComercialTabla';
 import CosteoCrisolesFila from './modulos/CosteoCrisolesTabla';
 import CosteoFundenteFila from './modulos/CosteoFundenteTabla';
+import CosteoCopelasFila from './modulos/CosteoCopelasTabla';
 import TablaGenerica from './common/TablaGenerica';
 import Offcanvas from './Offcanvas';
 import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
@@ -25,6 +26,7 @@ const FILAS_ESPECIFICAS = {
   'Forecast de Ventas': ForecastComercialFila,
   'Costeo de Crisoles': CosteoCrisolesFila,
   'Costeo de Fundente': CosteoFundenteFila,
+  'Costeo de Copelas': CosteoCopelasFila,
   'Costeo de Embalajes': CosteoEmbalajesFila,
 };
 
