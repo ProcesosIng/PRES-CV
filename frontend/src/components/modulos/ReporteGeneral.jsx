@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import ReporteGantt, { MESES_CORTOS, mesesVacios, totalMontoGrupos } from './ReporteGantt';
 import { listarVersiones } from '../../data/store';
 
 // El Forecast (ventas) y los Costeos (formularios de apoyo que calculan el costo de cada
@@ -28,12 +29,16 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
+  // Vistas tipo Gantt (Forecast, Compras, Producción)
+  const [anioGantt, setAnioGantt] = useState('');
+  const [filtroUnidadNegocio, setFiltroUnidadNegocio] = useState('');
+  const [centroProduccion, setCentroProduccion] = useState('');
+  const [modoCompras, setModoCompras] = useState('modulo');
+
   // Estados de ordenamiento seguros
   const [ordenGeneral, setOrdenGeneral] = useState({ columna: 'fecha_proyeccion', direccion: 'asc' });
-  const [ordenForecast, setOrdenForecast] = useState({ columna: 'ingresosTotal', direccion: 'desc' });
   const [ordenGastos, setOrdenGastos] = useState({ columna: 'total', direccion: 'desc' });
-  const [ordenCompras, setOrdenCompras] = useState({ columna: 'fecha', direccion: 'asc' });
-  const [ordenProduccion, setOrdenProduccion] = useState({ columna: 'fecha', direccion: 'asc' });
+  const [ordenCompras] = useState({ columna: 'fecha', direccion: 'asc' });
 
   const versionesDisponibles = useMemo(() => {
     try {
@@ -74,31 +79,31 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       if (PESTANAS_SOLO_GASTOS.includes(tipoReporte) && esForecastOCosteo(reg.modulo)) return false;
 
       if (filtroVersion && reg.id_version !== filtroVersion) return false;
-      if (filtroModulo && reg.modulo !== filtroModulo) return false;
-      
+      // Cada filtro solo aplica en las pestañas donde se muestra.
+      const usaModuloArea = ['general', 'gastos_areas', 'compras'].includes(tipoReporte);
+      if (usaModuloArea && filtroModulo && reg.modulo !== filtroModulo) return false;
+
       const areaReg = reg.area || dc.area || '';
-      if (filtroArea && areaReg !== filtroArea) return false;
+      if (usaModuloArea && filtroArea && areaReg !== filtroArea) return false;
 
-      const clienteReg = dc.cliente || '';
-      if (filtroCliente && clienteReg !== filtroCliente) return false;
-
-      const vendedorReg = dc.vendedor || '';
-      if (filtroVendedor && vendedorReg !== filtroVendedor) return false;
-
-      const monedaReg = dc.moneda || '';
-      if (filtroMoneda && monedaReg !== filtroMoneda) return false;
+      if (tipoReporte === 'forecast') {
+        if (filtroCliente && (dc.cliente || '') !== filtroCliente) return false;
+        if (filtroVendedor && (dc.vendedor || '') !== filtroVendedor) return false;
+        if (filtroMoneda && (dc.moneda || '') !== filtroMoneda) return false;
+        if (filtroUnidadNegocio && (dc.unidad_negocio || '') !== filtroUnidadNegocio) return false;
+      }
 
       // Si estamos en Forecast o Compras, omitimos este filtro global de texto porque se procesa de forma específica en su propio useMemo
-      if (tipoReporte !== 'forecast' && tipoReporte !== 'compras' && filtroPersona) {
+      if (!['forecast', 'compras', 'produccion'].includes(tipoReporte) && filtroPersona) {
         const nombre = (reg.empleado_nombre || dc.producto || '').toLowerCase();
         const dni = (reg.empleado_dni || '').toLowerCase();
         const busqueda = filtroPersona.toLowerCase();
         if (!nombre.includes(busqueda) && !dni.includes(busqueda)) return false;
       }
 
-      // Filtro de fechas robusto con normalización de barras
+      // Filtro de fechas robusto con normalización de barras (Forecast y Producción usan el AÑO)
       const fechaRegStr = reg.fecha_proyeccion;
-      if (fechaRegStr) {
+      if (fechaRegStr && !['forecast', 'produccion'].includes(tipoReporte)) {
         let fechaRegNormalizada = fechaRegStr;
         if (fechaRegStr.includes('/')) {
           const partes = fechaRegStr.split('/');
@@ -131,7 +136,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       if (valA > valB) return ordenGeneral.direccion === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [registrosTotales, filtroVersion, filtroModulo, filtroArea, filtroPersona, fechaDesde, fechaHasta, filtroCliente, filtroVendedor, filtroMoneda, ordenGeneral, tipoReporte]);
+  }, [registrosTotales, filtroVersion, filtroModulo, filtroArea, filtroPersona, fechaDesde, fechaHasta, filtroCliente, filtroVendedor, filtroMoneda, filtroUnidadNegocio, ordenGeneral, tipoReporte]);
 
   // Agrupación dinámica para el Reporte General
   const resumenGeneralAgrupado = useMemo(() => {
@@ -169,60 +174,6 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     setGruposGeneralesExpandidos(prev => ({ ...prev, [nombreGrupo]: !prev[nombreGrupo] }));
   };
 
-  // 1. Forecast de Ventas por Producto y Moneda (Con soporte de búsqueda por texto integrado)
-  const resumenForecast = useMemo(() => {
-    const mapa = {};
-    registrosFiltrados
-      .filter(r => r.modulo === 'Forecast de Ventas')
-      .forEach(reg => {
-        const dc = reg.detalle_columnas || {};
-        const prod = dc.producto || 'Sin Producto';
-        const unidadNeg = dc.unidad_negocio || 'General';
-        const um = dc.um || 'und';
-        const moneda = dc.moneda || 'S/';
-        
-        const claveMapa = `${prod}_${moneda}`;
-        const cantidadAnio = parseFloat(dc.cantidad_total_anio) || 0;
-        const ingresos = parseFloat(reg.totales?.ingreso_total || dc.ingreso_total) || 0;
-        const costos = parseFloat(reg.totales?.costo_total || dc.costo_total) || 0;
-        const margen = parseFloat(reg.totales?.margen_bruto || dc.margen_bruto) || 0;
-
-        if (!mapa[claveMapa]) {
-          mapa[claveMapa] = { producto: prod, unidadNegocio: unidadNeg, um, moneda, cantidadTotal: 0, ingresosTotal: 0, costosTotal: 0, margenTotal: 0 };
-        }
-        mapa[claveMapa].cantidadTotal += cantidadAnio;
-        mapa[claveMapa].ingresosTotal += ingresos;
-        mapa[claveMapa].costosTotal += costos;
-        mapa[claveMapa].margenTotal += margen;
-      });
-
-    let lista = Object.values(mapa);
-
-    // Filtrar por texto escrito en BUSCAR PRODUCTO
-    if (filtroPersona) {
-      const queryBusqueda = filtroPersona.toLowerCase();
-      lista = lista.filter(item => 
-        item.producto.toLowerCase().includes(queryBusqueda) ||
-        item.unidadNegocio.toLowerCase().includes(queryBusqueda)
-      );
-    }
-
-    return lista.sort((a, b) => {
-      let valA = a[ordenForecast.columna];
-      let valB = b[ordenForecast.columna];
-
-      if (typeof valA === 'number' && typeof valB === 'number') {
-        return ordenForecast.direccion === 'asc' ? valA - valB : valB - valA;
-      }
-
-      valA = valA !== undefined && valA !== null ? String(valA).toLowerCase() : '';
-      valB = valB !== undefined && valB !== null ? String(valB).toLowerCase() : '';
-
-      if (valA < valB) return ordenForecast.direccion === 'asc' ? -1 : 1;
-      if (valA > valB) return ordenForecast.direccion === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [registrosFiltrados, ordenForecast, filtroPersona]);
 
   // 2. Resumen de Gastos por Áreas con desglose anidado por Módulos
   const resumenGastosAreas = useMemo(() => {
@@ -280,14 +231,12 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       'Materias Primas',
       'Suministros',
       'Materiales Auxiliares y Suministros',
-      'Envases y Embalajes',
-      'Costeo de Crisoles',
-      'Costeo de Fundente',
-      'Costeo de Copelas'
+      'Envases y Embalajes'
     ];
+    // Los insumos de los costeos llegan por sus registros DERIVADOS (Materias Primas, Envases...).
+    // El forecast es venta, no compra: no entra aquí.
 
     const filasPlan = [];
-    const mesesMap = { Ene: '01', Feb: '02', Mar: '03', Abr: '04', May: '05', Jun: '06', Jul: '07', Ago: '08', Set: '09', Oct: '10', Nov: '11', Dic: '12' };
 
     const cumpleFiltroFecha = (fechaStr) => {
       if (!fechaStr) return true;
@@ -306,54 +255,13 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     registrosFiltrados.forEach(reg => {
       const dc = reg.detalle_columnas || {};
       const fechaBase = reg.fecha_proyeccion || '2027-01-01';
-      const anioReg = fechaBase.split('-')[0];
       const modulo = reg.modulo || 'General';
       const cuenta = dc.cuenta_afectada || dc.cuenta || dc.numero_cuenta || 'S/C';
 
-      if (modulo === 'Costeo de Crisoles' || modulo === 'Costeo de Fundente' || modulo === 'Costeo de Copelas') {
-        const listaInsumos = [...(reg.materiales || []), ...(reg.suministros || [])];
-
-        listaInsumos.forEach(item => {
-          const nombreInsumo = item.insumo || 'Insumo Planta';
-          const cuentaInsumo = item.cuenta || cuenta;
-          const costoUnit = parseFloat(item.costoUnitario || item.valor || 0);
-
-          if (item.cantidadesMeses && typeof item.cantidadesMeses === 'object') {
-            Object.entries(item.cantidadesMeses).forEach(([mesStr, cantVal]) => {
-              const cantidadMes = parseFloat(cantVal) || 0;
-              if (cantidadMes > 0) {
-                const numMes = mesesMap[mesStr] || '01';
-                const fechaFila = `${anioReg}-${numMes}-01`;
-                
-                if (cumpleFiltroFecha(fechaFila)) {
-                  const costoMes = cantidadMes * costoUnit;
-                  filasPlan.push({
-                    fecha: fechaFila,
-                    modulo: `${modulo} (Insumo)`,
-                    cuenta: cuentaInsumo,
-                    producto: nombreInsumo.trim(),
-                    cantidad: cantidadMes,
-                    totalCosto: costoMes
-                  });
-                }
-              }
-            });
-          } else {
-            const cantidadTotalItem = parseFloat(item.cantidadTotal || item.valor || 1);
-            if (cumpleFiltroFecha(fechaBase)) {
-              filasPlan.push({
-                fecha: fechaBase,
-                modulo: `${modulo} (Insumo)`,
-                cuenta: cuentaInsumo,
-                producto: nombreInsumo.trim(),
-                cantidad: cantidadTotalItem,
-                totalCosto: cantidadTotalItem * costoUnit
-              });
-            }
-          }
-        });
-      } 
-      else if (modulo === 'Uniforme - EPPs' || modulo === 'Uniformes - EPPs') {
+      if (modulo.startsWith('Costeo de') || modulo === 'Forecast de Ventas') {
+        return;
+      }
+      if (modulo === 'Uniforme - EPPs' || modulo === 'Uniformes - EPPs') {
         const filasEpps = reg.variables_registro?.filasEpps || [];
         if (filasEpps.length > 0) {
           filasEpps.forEach(itemEpp => {
@@ -411,30 +319,6 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           });
         }
       }
-      else if (modulo === 'Forecast de Ventas' && dc.cantidades && typeof dc.cantidades === 'object') {
-        const productoLimpio = dc.producto || 'Producto Forecast';
-        const costoUni = parseFloat(dc.costo_unitario || dc.cv_2025) || 0;
-
-        Object.entries(dc.cantidades).forEach(([mesStr, cantVal]) => {
-          const cantidadMes = parseFloat(cantVal) || 0;
-          if (cantidadMes > 0) {
-            const numMes = mesesMap[mesStr] || '01';
-            const fechaFila = `${anioReg}-${numMes}-01`;
-
-            if (cumpleFiltroFecha(fechaFila)) {
-              const costoMes = cantidadMes * costoUni;
-              filasPlan.push({
-                fecha: fechaFila,
-                modulo: 'Forecast de Ventas (Demanda)',
-                cuenta: 'Requerimiento de Producción/Compras',
-                producto: productoLimpio.trim(),
-                cantidad: cantidadMes,
-                totalCosto: costoMes
-              });
-            }
-          }
-        });
-      }
     });
 
     let resultadoFinal = filasPlan;
@@ -464,55 +348,157 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     });
   }, [registrosFiltrados, ordenCompras, fechaDesde, fechaHasta, filtroPersona]);
 
-  // 4. Plan de Producción
-  const resumenProduccion = useMemo(() => {
-    const modulosProd = ['Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas'];
-    let filtrados = registrosFiltrados.filter(r => modulosProd.includes(r.modulo));
 
-    if (filtroPersona) {
-      const queryBusqueda = filtroPersona.toLowerCase();
-      filtrados = filtrados.filter(reg => {
-        const dc = reg.detalle_columnas || {};
-        const nombre = (reg.empleado_nombre || dc.detalle || '').toLowerCase();
-        const cuenta = (dc.cuenta_afectada || dc.numero_cuenta || '').toLowerCase();
-        return nombre.includes(queryBusqueda) || cuenta.includes(queryBusqueda);
-      });
-    }
+  // ===================== VISTAS GANTT =====================
+  const numMesDe = (fecha) => {
+    const m = String(fecha || '').match(/^(\d{4})-(\d{2})/);
+    return m ? { anio: m[1], mes: parseInt(m[2], 10) - 1 } : null;
+  };
+  const anioDeRegistro = (reg) => String(reg.detalle_columnas?.anio_proyeccion || numMesDe(reg.fecha_proyeccion)?.anio || '');
+  const esCosteoProduccion = (m) => String(m || '').startsWith('Costeo de') && m !== 'Costeo de Embalajes';
 
-    return filtrados.sort((a, b) => {
-      let valA = a[ordenProduccion.columna];
-      let valB = b[ordenProduccion.columna];
-
-      if (ordenProduccion.columna === 'monto') {
-        valA = parseFloat(a.totales?.costo_total || a.detalle_columnas?.costo_total || 0);
-        valB = parseFloat(b.totales?.costo_total || b.detalle_columnas?.costo_total || 0);
-        return ordenProduccion.direccion === 'asc' ? valA - valB : valB - valA;
-      }
-
-      valA = valA !== undefined && valA !== null ? String(valA).toLowerCase() : '';
-      valB = valB !== undefined && valB !== null ? String(valB).toLowerCase() : '';
-
-      if (valA < valB) return ordenProduccion.direccion === 'asc' ? -1 : 1;
-      if (valA > valB) return ordenProduccion.direccion === 'asc' ? 1 : -1;
-      return 0;
+  // Años con datos en la pestaña actual (el Gantt muestra un año a la vez)
+  const aniosGantt = useMemo(() => {
+    const set = new Set();
+    registrosTotales.forEach(reg => {
+      const incluir = tipoReporte === 'forecast' ? reg.modulo === 'Forecast de Ventas'
+        : tipoReporte === 'produccion' ? esCosteoProduccion(reg.modulo)
+        : tipoReporte === 'compras' ? !esForecastOCosteo(reg.modulo) : false;
+      if (!incluir) return;
+      const a = anioDeRegistro(reg);
+      if (a) set.add(a);
     });
-  }, [registrosFiltrados, ordenProduccion, filtroPersona]);
+    return Array.from(set).sort();
+  }, [registrosTotales, tipoReporte]);
+
+  const anioActivoGantt = aniosGantt.includes(anioGantt) ? anioGantt : (aniosGantt[0] || '');
+
+  const unidadesNegocioDisponibles = useMemo(() => Array.from(new Set(
+    registrosTotales.filter(r => r.modulo === 'Forecast de Ventas').map(r => r.detalle_columnas?.unidad_negocio).filter(Boolean)
+  )).sort(), [registrosTotales]);
+
+  const centrosProduccionDisponibles = useMemo(() => Array.from(new Set(
+    registrosTotales.filter(r => esCosteoProduccion(r.modulo)).map(r => r.area).filter(Boolean)
+  )).sort(), [registrosTotales]);
+
+  const agruparEnGrupos = (mapaGrupos) => Object.values(mapaGrupos)
+    .map(g => ({ ...g, filas: Object.values(g.filas).sort((a, b) => a.titulo.localeCompare(b.titulo)) }))
+    .sort((a, b) => a.titulo.localeCompare(b.titulo));
+
+  const acumular = (fila, mes, cantidad, monto, origen) => {
+    const celda = fila.meses[mes];
+    celda.cantidad += cantidad;
+    celda.monto += monto;
+    if (origen) celda.origen[origen] = (celda.origen[origen] || 0) + cantidad;
+  };
+
+  // PLAN DE COMPRAS: módulo (izquierda) -> producto; o todo totalizado por producto.
+  const ganttCompras = useMemo(() => {
+    const grupos = {};
+    resumenPlanCompras.forEach(item => {
+      const f = numMesDe(item.fecha);
+      if (!f || f.anio !== anioActivoGantt) return;
+      const nombreBase = item.producto.replace(/\s*\([^)]*\)\s*$/, '').trim() || item.producto;
+      const paraQue = (item.producto.match(/\(([^)]*)\)\s*$/) || [])[1];
+      const claveGrupo = modoCompras === 'modulo' ? item.modulo : 'TODOS';
+      const titulo = modoCompras === 'modulo' ? item.modulo : 'Todos los productos a comprar';
+      if (!grupos[claveGrupo]) grupos[claveGrupo] = { clave: claveGrupo, titulo, filas: {} };
+      const claveFila = modoCompras === 'modulo' ? item.producto : nombreBase.toUpperCase();
+      if (!grupos[claveGrupo].filas[claveFila]) {
+        grupos[claveGrupo].filas[claveFila] = { clave: claveFila, titulo: modoCompras === 'modulo' ? item.producto : nombreBase, subtitulo: '', meses: mesesVacios(), _origenes: new Set() };
+      }
+      const fila = grupos[claveGrupo].filas[claveFila];
+      const origen = paraQue ? `${item.modulo} · ${paraQue}` : item.modulo;
+      fila._origenes.add(item.modulo);
+      acumular(fila, f.mes, item.cantidad || 0, item.totalCosto || 0, origen);
+    });
+    Object.values(grupos).forEach(g => Object.values(g.filas).forEach(f => {
+      f.subtitulo = modoCompras === 'total' ? `Origen: ${Array.from(f._origenes).join(', ')}` : '';
+      delete f._origenes;
+    }));
+    return agruparEnGrupos(grupos);
+  }, [resumenPlanCompras, anioActivoGantt, modoCompras]);
+
+  // FORECAST: unidad de negocio -> producto (suma de clientes). Cantidad esperada e ingreso en soles.
+  const ganttForecast = useMemo(() => {
+    const grupos = {};
+    const q = (filtroPersona || '').toLowerCase();
+    registrosFiltrados.filter(r => r.modulo === 'Forecast de Ventas').forEach(reg => {
+      const dc = reg.detalle_columnas || {};
+      if (anioDeRegistro(reg) !== anioActivoGantt) return;
+      const producto = dc.producto || 'Sin producto';
+      if (q && !producto.toLowerCase().includes(q) && !String(dc.cliente || '').toLowerCase().includes(q)) return;
+      const un = dc.unidad_negocio || 'Sin unidad de negocio';
+      const tc = dc.moneda === 'US$' ? (parseFloat(dc.tipo_cambio) || 1) : 1;
+      const precio = parseFloat(dc.precio_venta) || 0;
+      const costo = parseFloat(dc.costo_unitario) || 0;
+      if (!grupos[un]) grupos[un] = { clave: un, titulo: un, filas: {} };
+      const claveFila = `${producto}|${dc.um || ''}`;
+      if (!grupos[un].filas[claveFila]) {
+        grupos[un].filas[claveFila] = { clave: claveFila, titulo: producto, unidad: dc.um || '', meses: mesesVacios(), _clientes: new Set(), _ingreso: 0, _costo: 0, _cant: 0 };
+      }
+      const fila = grupos[un].filas[claveFila];
+      fila._clientes.add(dc.cliente || '-');
+      MESES_CORTOS.forEach((m, i) => {
+        const cant = parseFloat(dc.cantidades?.[m]) || 0;
+        if (!cant) return;
+        const prob = dc.tipo_probabilidad === 'general' || !dc.probabilidades_meses
+          ? (parseFloat(dc.probabilidad_general ?? 100) || 0)
+          : (parseFloat(dc.probabilidades_meses?.[m] ?? 100) || 0);
+        const esperada = cant * prob / 100;
+        const ingreso = esperada * precio * tc;
+        fila._ingreso += ingreso;
+        fila._costo += esperada * costo * tc;
+        fila._cant += esperada;
+        acumular(fila, i, esperada, ingreso, dc.cliente || '-');
+      });
+    });
+    Object.values(grupos).forEach(g => Object.values(g.filas).forEach(f => {
+      const margen = f._ingreso - f._costo;
+      const pct = f._ingreso > 0 ? (margen / f._ingreso) * 100 : 0;
+      const pvProm = f._cant > 0 ? f._ingreso / f._cant : 0;
+      f.subtitulo = `${f._clientes.size} cliente(s) · PV prom. S/ ${pvProm.toFixed(2)} · Margen S/ ${margen.toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pct.toFixed(1)}%)`;
+      ['_clientes', '_ingreso', '_costo', '_cant'].forEach(k => delete f[k]);
+    }));
+    return agruparEnGrupos(grupos);
+  }, [registrosFiltrados, anioActivoGantt, filtroPersona]);
+
+  // PLAN DE PRODUCCIÓN: centro de producción -> producto. Cantidad a producir y costo (cantidad × costo unitario).
+  const ganttProduccion = useMemo(() => {
+    const grupos = {};
+    const q = (filtroPersona || '').toLowerCase();
+    registrosFiltrados.filter(r => esCosteoProduccion(r.modulo)).forEach(reg => {
+      const dc = reg.detalle_columnas || {};
+      if (centroProduccion && reg.area !== centroProduccion) return;
+      if (anioDeRegistro(reg) !== anioActivoGantt) return;
+      const producto = dc.producto || reg.empleado_nombre || 'Sin producto';
+      if (q && !producto.toLowerCase().includes(q)) return;
+      const centro = reg.area || 'Sin centro';
+      const cUnit = parseFloat(dc.costo_unitario_promedio) || 0;
+      if (!grupos[centro]) grupos[centro] = { clave: centro, titulo: centro, filas: {} };
+      if (!grupos[centro].filas[producto]) {
+        grupos[centro].filas[producto] = { clave: producto, titulo: producto, meses: mesesVacios(), _cUnit: cUnit, _comercial: 0 };
+      }
+      const fila = grupos[centro].filas[producto];
+      fila._comercial += parseFloat(dc.cantidad_total_comercial) || 0;
+      MESES_CORTOS.forEach((m, i) => {
+        const cant = parseFloat(dc.cantidades_produccion?.[m]) || 0;
+        if (cant) acumular(fila, i, cant, cant * cUnit, reg.modulo);
+      });
+    });
+    Object.values(grupos).forEach(g => Object.values(g.filas).forEach(f => {
+      f.subtitulo = `Costo unit. S/ ${f._cUnit.toFixed(4)} · Demanda comercial ${f._comercial.toLocaleString('en-US')}`;
+      delete f._cUnit; delete f._comercial;
+    }));
+    return agruparEnGrupos(grupos);
+  }, [registrosFiltrados, anioActivoGantt, centroProduccion, filtroPersona]);
 
   const granTotal = useMemo(() => {
-    if (tipoReporte === 'forecast') {
-      return resumenForecast.reduce((acc, i) => acc + i.ingresosTotal, 0);
-    }
+    if (tipoReporte === 'forecast') return totalMontoGrupos(ganttForecast);
+    if (tipoReporte === 'compras') return totalMontoGrupos(ganttCompras);
+    if (tipoReporte === 'produccion') return totalMontoGrupos(ganttProduccion);
     if (tipoReporte === 'gastos_areas') {
       return resumenGastosAreas.reduce((acc, i) => acc + i.total, 0);
-    }
-    if (tipoReporte === 'compras') {
-      return resumenPlanCompras.reduce((acc, i) => acc + i.totalCosto, 0);
-    }
-    if (tipoReporte === 'produccion') {
-      return resumenProduccion.reduce((acc, reg) => {
-        const dc = reg.detalle_columnas || {};
-        return acc + parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-      }, 0);
     }
     return registrosFiltrados.reduce((acc, reg) => {
       const dc = reg.detalle_columnas || {};
@@ -521,7 +507,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
         : parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
       return acc + valor;
     }, 0);
-  }, [registrosFiltrados, tipoReporte, resumenForecast, resumenGastosAreas, resumenPlanCompras, resumenProduccion]);
+  }, [registrosFiltrados, tipoReporte, resumenGastosAreas, ganttForecast, ganttCompras, ganttProduccion]);
 
   const limpiarFiltros = () => {
     setFiltroVersion('');
@@ -531,6 +517,8 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     setFiltroCliente('');
     setFiltroVendedor('');
     setFiltroMoneda('');
+    setFiltroUnidadNegocio('');
+    setCentroProduccion('');
     setFechaDesde('');
     setFechaHasta('');
   };
@@ -540,26 +528,24 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     let filas = [];
     let nombreReporte = tipoReporte;
 
-    if (tipoReporte === 'forecast') {
-      if (resumenForecast.length === 0) {
-        alert('No hay registros de Forecast para exportar.');
+    const ganttActual = { forecast: ganttForecast, compras: ganttCompras, produccion: ganttProduccion }[tipoReporte];
+    if (ganttActual) {
+      if (ganttActual.length === 0) {
+        alert('No hay datos para exportar con los filtros seleccionados.');
         return;
       }
-      headers = ['Unidad de Negocio', 'Producto', 'UM', 'Moneda', 'Cantidad Total', 'Ingresos', 'Costos', 'Margen Bruto'];
-      filas = resumenForecast.map(item => {
-        const pct = item.ingresosTotal > 0 ? ((item.margenTotal / item.ingresosTotal) * 100).toFixed(1) + '%' : '0%';
-        return [
-          `"${item.unidadNegocio}"`,
-          `"${item.producto}"`,
-          `"${item.um}"`,
-          `"${item.moneda}"`,
-          item.cantidadTotal,
-          item.ingresosTotal.toFixed(2),
-          item.costosTotal.toFixed(2),
-          `"${item.margenTotal.toFixed(2)} (${pct})"`
-        ].join(';');
-      });
-    } 
+      headers = ['Grupo', 'Detalle', 'Información', ...MESES_CORTOS.flatMap(m => [`${m} Cant.`, `${m} S/`]), 'Total Cant.', 'Total S/'];
+      ganttActual.forEach(g => g.filas.forEach(f => {
+        const totCant = f.meses.reduce((a, m) => a + m.cantidad, 0);
+        const totMonto = f.meses.reduce((a, m) => a + m.monto, 0);
+        filas.push([
+          `"${g.titulo}"`, `"${f.titulo}"`, `"${f.subtitulo || ''}"`,
+          ...f.meses.flatMap(m => [m.cantidad.toFixed(2), m.monto.toFixed(2)]),
+          totCant.toFixed(2), totMonto.toFixed(2)
+        ].join(';'));
+      }));
+      nombreReporte = `${tipoReporte}_${anioActivoGantt}`;
+    }
     else if (tipoReporte === 'gastos_areas') {
       if (resumenGastosAreas.length === 0) {
         alert('No hay registros de Gastos por Áreas para exportar.');
@@ -574,42 +560,6 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
             mod.monto.toFixed(2)
           ].join(';'));
         });
-      });
-    } 
-    else if (tipoReporte === 'compras') {
-      if (resumenPlanCompras.length === 0) {
-        alert('No hay registros en el Plan de Compras para exportar.');
-        return;
-      }
-      headers = ['Fecha', 'Módulo de Origen', 'Cuenta Contable', 'Producto / Insumo', 'Cantidad Mensual', 'Costo / Valor Total (S/)'];
-      filas = resumenPlanCompras.map(item => {
-        return [
-          `"${item.fecha}"`,
-          `"${item.modulo}"`,
-          `"${item.cuenta}"`,
-          `"${item.producto}"`,
-          item.cantidad,
-          item.totalCosto.toFixed(2)
-        ].join(';');
-      });
-    } 
-    else if (tipoReporte === 'produccion') {
-      if (resumenProduccion.length === 0) {
-        alert('No hay registros en el Plan de Producción para exportar.');
-        return;
-      }
-      headers = ['Fecha', 'Módulo', 'Área', 'Concepto / Cuenta', 'Total (S/)'];
-      filas = resumenProduccion.map(reg => {
-        const dc = reg.detalle_columnas || {};
-        const cuenta = dc.cuenta_afectada || dc.numero_cuenta || 'S/C';
-        const monto = parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-        return [
-          `"${reg.fecha_proyeccion || 'N/A'}"`,
-          `"${reg.modulo || 'N/A'}"`,
-          `"${reg.area || dc.area || 'N/A'}"`,
-          `"${cuenta} - ${reg.empleado_nombre || dc.detalle || 'N/A'}"`,
-          monto.toFixed(2)
-        ].join(';');
       });
     } 
     else {
@@ -660,29 +610,14 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
             📥 Descargar CSV / Excel
           </button>
           
-          {tipoReporte === 'forecast' ? (
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <div style={{ background: '#dcfce7', padding: '10px 16px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
-                <div style={{ fontSize: '10px', color: '#166534', fontWeight: 'bold' }}>TOTAL SOLES (S/)</div>
-                <div style={{ fontSize: '18px', color: '#15803d', fontWeight: 800 }}>
-                  S/ {resumenForecast.filter(i => i.moneda === 'S/' || !i.moneda).reduce((acc, i) => acc + i.ingresosTotal, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-              <div style={{ background: '#fef3c7', padding: '10px 16px', borderRadius: '8px', border: '1px solid #fde68a', textAlign: 'right' }}>
-                <div style={{ fontSize: '10px', color: '#92400e', fontWeight: 'bold' }}>TOTAL DÓLARES (US$)</div>
-                <div style={{ fontSize: '18px', color: '#b45309', fontWeight: 800 }}>
-                  US$ {resumenForecast.filter(i => i.moneda === 'US$').reduce((acc, i) => acc + i.ingresosTotal, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
+          <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
+            <div style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>
+              {{ forecast: 'INGRESO PROYECTADO (US$ convertido a S/)', compras: 'COSTO DE COMPRAS', produccion: 'COSTO DE PRODUCCIÓN' }[tipoReporte] || 'TOTAL FILTRADO'}
             </div>
-          ) : (
-            <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
-              <div style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>TOTAL FILTRADO</div>
-              <div style={{ fontSize: '20px', color: '#15803d', fontWeight: 800 }}>
-                S/ {granTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
+            <div style={{ fontSize: '20px', color: '#15803d', fontWeight: 800 }}>
+              S/ {granTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -728,6 +663,21 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           {tipoReporte === 'forecast' && (
             <>
               <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>AÑO</label>
+                <select value={anioActivoGantt} onChange={e => setAnioGantt(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  {aniosGantt.length === 0 && <option value="">Sin datos</option>}
+                  {aniosGantt.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>UNIDAD DE NEGOCIO</label>
+                <select value={filtroUnidadNegocio} onChange={e => setFiltroUnidadNegocio(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  <option value="">Todas</option>
+                  {unidadesNegocioDisponibles.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>CLIENTE</label>
                 <select value={filtroCliente} onChange={e => setFiltroCliente(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
                   <option value="">Todos los clientes</option>
@@ -753,8 +703,8 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
               </div>
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>BUSCAR PRODUCTO</label>
-                <input type="text" placeholder="Nombre de producto..." value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>BUSCAR PRODUCTO / CLIENTE</label>
+                <input type="text" placeholder="Producto o cliente..." value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
               </div>
             </>
           )}
@@ -763,10 +713,25 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           {tipoReporte === 'compras' && (
             <>
               <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>AÑO</label>
+                <select value={anioActivoGantt} onChange={e => setAnioGantt(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  {aniosGantt.length === 0 && <option value="">Sin datos</option>}
+                  {aniosGantt.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>MÓDULO</label>
                 <select value={filtroModulo} onChange={e => setFiltroModulo(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
                   <option value="">Todos los módulos</option>
                   {modulosDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>ÁREA</label>
+                <select value={filtroArea} onChange={e => setFiltroArea(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  <option value="">Todas las áreas</option>
+                  {areasDisponibles.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
 
@@ -787,8 +752,34 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
             </>
           )}
 
-          {/* Filtros exclusivos para REPORTES OPERATIVOS Y GENERALES */}
-          {tipoReporte !== 'forecast' && tipoReporte !== 'compras' && (
+          {/* Filtros exclusivos para PLAN DE PRODUCCIÓN (solo costeos de cada centro) */}
+          {tipoReporte === 'produccion' && (
+            <>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>AÑO</label>
+                <select value={anioActivoGantt} onChange={e => setAnioGantt(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  {aniosGantt.length === 0 && <option value="">Sin datos</option>}
+                  {aniosGantt.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>CENTRO DE PRODUCCIÓN</label>
+                <select value={centroProduccion} onChange={e => setCentroProduccion(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
+                  <option value="">Todos los centros</option>
+                  {centrosProduccionDisponibles.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>BUSCAR PRODUCTO</label>
+                <input type="text" placeholder="Ej. Crisol 40..." value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
+              </div>
+            </>
+          )}
+
+          {/* Filtros de REPORTE GENERAL y GASTOS POR ÁREAS */}
+          {(tipoReporte === 'general' || tipoReporte === 'gastos_areas') && (
             <>
               <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>MÓDULO</label>
@@ -833,69 +824,12 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
 
       {/* 1. REPORTE FORECAST DE VENTAS */}
       {tipoReporte === 'forecast' && (
-        <div style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: 0 }}>📈 Consolidado de Forecast de Ventas por Producto</h3>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>Ordenar por:</label>
-              <select value={ordenForecast.columna} onChange={e => setOrdenForecast({ ...ordenForecast, columna: e.target.value })} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                <option value="ingresosTotal">Ingresos</option>
-                <option value="margenTotal">Margen Bruto</option>
-                <option value="cantidadTotal">Cantidad Total</option>
-                <option value="producto">Producto</option>
-              </select>
-              <button type="button" onClick={() => setOrdenForecast(prev => ({ ...prev, direccion: prev.direccion === 'asc' ? 'desc' : 'asc' }))} style={{ padding: '6px 12px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-                {ordenForecast.direccion === 'asc' ? '⬆️ Ascendente' : '⬇️ Descendente'}
-              </button>
-            </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', margin: 0 }}>📈 Forecast de Ventas {anioActivoGantt}</h3>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>Cantidad esperada (cantidad × probabilidad) e ingreso en soles</span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-              <thead style={{ background: '#f1f5f9', color: '#475569', fontWeight: 700, borderBottom: '2px solid #cbd5e1' }}>
-                <tr>
-                  <th style={{ padding: '10px 12px' }}>UNIDAD DE NEGOCIO</th>
-                  <th style={{ padding: '10px 12px' }}>PRODUCTO</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>UM</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center' }}>MONEDA</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>CANTIDAD TOTAL</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>INGRESOS</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>COSTOS</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>MARGEN BRUTO</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resumenForecast.length > 0 ? (
-                  resumenForecast.map((item, idx) => {
-                    const pct = item.ingresosTotal > 0 ? (item.margenTotal / item.ingresosTotal) * 100 : 0;
-                    return (
-                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px 12px' }}><span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>{item.unidadNegocio}</span></td>
-                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>{item.producto}</td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748b' }}>{item.um}</td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <span style={{ background: item.moneda === 'US$' ? '#fef3c7' : '#e0f2fe', color: item.moneda === 'US$' ? '#92400e' : '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
-                            {item.moneda}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{item.cantidadTotal.toLocaleString()}</td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#166534', fontWeight: 700 }}>
-                          {item.ingresosTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#991b1b' }}>
-                          {item.costosTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#047857', fontWeight: 700 }}>
-                          {item.margenTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} <span style={{ fontSize: '11px', color: '#64748b' }}>({pct.toFixed(1)}%)</span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr><td colSpan="8" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No hay datos de forecast registrados.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ReporteGantt grupos={ganttForecast} etiquetaCantidad="Cantidad a vender" etiquetaMonto="Ingreso" colorBase="14, 165, 233" vacio="No hay forecast para los filtros seleccionados." />
         </div>
       )}
 
@@ -973,119 +907,28 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
 
       {/* 3. REPORTE PLAN DE COMPRAS */}
       {tipoReporte === 'compras' && (
-        <div style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: 0 }}>🛒 Detalle Mensualizado del Plan de Compras e Insumos</h3>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>Ordenar por:</label>
-              <select value={ordenCompras.columna} onChange={e => setOrdenCompras({ ...ordenCompras, columna: e.target.value })} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                <option value="totalCosto">Costo / Valor Total (S/)</option>
-                <option value="fecha">Fecha</option>
-                <option value="cantidad">Cantidad Mensual</option>
-                <option value="producto">Producto / Insumo</option>
-              </select>
-              <button type="button" onClick={() => setOrdenCompras(prev => ({ ...prev, direccion: prev.direccion === 'asc' ? 'desc' : 'asc' }))} style={{ padding: '6px 12px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-                {ordenCompras.direccion === 'asc' ? '⬆️ Ascendente' : '⬇️ Descendente'}
-              </button>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', margin: 0 }}>🛒 Plan de Compras {anioActivoGantt}</h3>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Ver:</span>
+              {[['modulo', 'Por módulo de origen'], ['total', 'Totalizado por producto']].map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setModoCompras(id)} style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, background: modoCompras === id ? '#2563eb' : 'white', color: modoCompras === id ? 'white' : '#475569', border: modoCompras === id ? '1px solid #2563eb' : '1px solid #cbd5e1' }}>{label}</button>
+              ))}
             </div>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-              <thead style={{ background: '#f1f5f9', color: '#475569', fontWeight: 700, borderBottom: '2px solid #cbd5e1' }}>
-                <tr>
-                  <th style={{ padding: '10px 12px' }}>FECHA</th>
-                  <th style={{ padding: '10px 12px' }}>MÓDULO DE ORIGEN</th>
-                  <th style={{ padding: '10px 12px' }}>CUENTA CONTABLE</th>
-                  <th style={{ padding: '10px 12px' }}>PRODUCTO / INSUMO</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>CANTIDAD MENSUAL</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>COSTO / VALOR TOTAL (S/)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resumenPlanCompras.length > 0 ? (
-                  resumenPlanCompras.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: 600 }}>
-                        {item.fecha !== 'N/A' ? item.fecha.split('-').reverse().join('/') : 'N/A'}
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <span style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
-                          {item.modulo}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 600, color: '#475569' }}>{item.cuenta}</td>
-                      <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0f172a' }}>{item.producto}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
-                        {item.cantidad.toLocaleString('en-US', { maximumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#166534' }}>
-                        S/ {item.totalCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan="6" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
-                      No se encontraron registros de compras, suministros o forecast vinculados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ReporteGantt grupos={ganttCompras} etiquetaCantidad="Cantidad a comprar" etiquetaMonto="Costo" colorBase="22, 163, 74" vacio="No hay compras para los filtros seleccionados." />
         </div>
       )}
 
       {/* 4. REPORTE PLAN DE PRODUCCIÓN */}
       {tipoReporte === 'produccion' && (
-        <div style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: 0 }}>⚙️ Detalle del Plan de Producción y Costeos</h3>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>Ordenar por:</label>
-              <select value={ordenProduccion.columna} onChange={e => setOrdenProduccion({ ...ordenProduccion, columna: e.target.value })} style={{ padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                <option value="monto">Total (S/)</option>
-                <option value="fecha_proyeccion">Fecha</option>
-                <option value="modulo">Módulo</option>
-              </select>
-              <button type="button" onClick={() => setOrdenProduccion(prev => ({ ...prev, direccion: prev.direccion === 'asc' ? 'desc' : 'asc' }))} style={{ padding: '6px 12px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-                {ordenProduccion.direccion === 'asc' ? '⬆️ Ascendente' : '⬇️ Descendente'}
-              </button>
-            </div>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', margin: 0 }}>⚙️ Plan de Producción {anioActivoGantt} — {centroProduccion || 'Todos los centros'}</h3>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>Cantidad a producir por producto y costo de producción (cantidad × costo unitario del costeo)</span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-              <thead style={{ background: '#f1f5f9', color: '#475569', fontWeight: 700, borderBottom: '2px solid #cbd5e1' }}>
-                <tr>
-                  <th style={{ padding: '10px 12px' }}>FECHA</th>
-                  <th style={{ padding: '10px 12px' }}>MÓDULO</th>
-                  <th style={{ padding: '10px 12px' }}>ÁREA</th>
-                  <th style={{ padding: '10px 12px' }}>CONCEPTO / CUENTA</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'right' }}>TOTAL (S/)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resumenProduccion.length > 0 ? (
-                  resumenProduccion.map((reg, idx) => {
-                    const dc = reg.detalle_columnas || {};
-                    const cuenta = dc.cuenta_afectada || dc.numero_cuenta || 'S/C';
-                    const monto = parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-                    return (
-                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px 12px' }}>{reg.fecha_proyeccion}</td>
-                        <td style={{ padding: '10px 12px' }}><span style={{ background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>{reg.modulo}</span></td>
-                        <td style={{ padding: '10px 12px' }}>{reg.area || dc.area}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{cuenta} - {reg.empleado_nombre || dc.detalle || 'N/A'}</td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#166534' }}>S/ {monto.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                      </tr>
-                    );
-                  })
-                ) : (
-                  <tr><td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No se encontraron registros para este plan.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ReporteGantt grupos={ganttProduccion} etiquetaCantidad="Cantidad a producir" etiquetaMonto="Costo de producción" colorBase="234, 88, 12" vacio="No hay costeos de producción guardados para este centro y año." />
         </div>
       )}
 
