@@ -194,7 +194,11 @@ export default function Offcanvas(props) {
       default: {
         // atiende automáticamente al resto de módulos
 
+        // Sin `modulo`/`categoria` el formulario guardaba todo como "General" y el
+        // registro no aparecía en su propio módulo (Atención al Personal, Examen Ocupacional...).
         const configGenerica = {
+          modulo: categoria,
+          categoria,
           prefijo: categoria ? categoria.substring(0, 3).toUpperCase() : 'MOD',
           tituloSeccion2: `2. Cuentas de ${categoria}`,
           labelDetalle: 'DETALLE / CONCEPTO',
