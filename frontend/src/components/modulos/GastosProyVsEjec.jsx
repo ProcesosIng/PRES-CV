@@ -60,6 +60,9 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
   const filas = [];
   const recorrer = (nodo, padreArea) => {
     Object.values(nodo.hijos).sort((a, b) => a.etiqueta.localeCompare(b.etiqueta)).forEach(h => {
+      // Sin proyectado ni ejecutado en los meses elegidos: la fila no aporta nada.
+      const v = valoresDe(h, mesesVisibles);
+      if (Math.abs(v.p) < 0.005 && Math.abs(v.e) < 0.005) return;
       const area = h.nivel === 0 ? h : padreArea;
       filas.push({ nodo: h, area });
       if (Object.keys(h.hijos).length && estaAbierto(h)) recorrer(h, area);
