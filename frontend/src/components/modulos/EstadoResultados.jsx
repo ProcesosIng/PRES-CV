@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_URL } from '../../config/api';
-import { LINEAS_EERR, MESES_EERR, calcularProyectado, calcularEjecutado, construirLineas, totalAnual } from '../../config/eerr';
+import { LINEAS_EERR, MESES_EERR, calcularProyectado, calcularEjecutado, lineasPeriodo } from '../../config/eerr';
 
 // Estado de Resultados: PROYECTADO (lo registrado en el sistema) vs EJECUTADO (asientos de Odoo).
 const ESTILO_FILA = {
@@ -57,19 +57,29 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
   }, [anio]);
 
   const tasas = { participacion: parseFloat(tasaPart) || 0, ir: parseFloat(tasaIR) || 0 };
-  const proy = useMemo(() => construirLineas(calcularProyectado(registrosTotales, { idVersion, anio }), tasas), [registrosTotales, idVersion, anio, tasaPart, tasaIR]);
-  const ejec = useMemo(() => construirLineas(calcularEjecutado(ejecutadoOdoo), tasas), [ejecutadoOdoo, tasaPart, tasaIR]);
+  // Saldos mensuales (debe - haber) del proyectado y del ejecutado
+  const baseProy = useMemo(() => calcularProyectado(registrosTotales, { idVersion, anio }), [registrosTotales, idVersion, anio]);
+  const baseEjec = useMemo(() => calcularEjecutado(ejecutadoOdoo), [ejecutadoOdoo]);
 
   const columnas = mesSel === 'todos' ? MESES_EERR.map((m, i) => ({ etiqueta: m, i })) : [{ etiqueta: MESES_EERR[+mesSel], i: +mesSel }];
-  const valor = (L, clave, i) => (i === 'total' ? totalAnual(L, clave) : L[clave][i]);
+  const TODOS_MESES = MESES_EERR.map((_, i) => i);
+  // Cada columna aplica las fórmulas sobre los saldos de su periodo (un mes o el año), como el DAX.
+  const lineasDe = (base, i) => lineasPeriodo(base, i === 'total' ? TODOS_MESES : [i], tasas);
+  const cacheLineas = useMemo(() => {
+    const c = { proy: {}, ejec: {} };
+    [...TODOS_MESES, 'total'].forEach(i => { c.proy[i] = lineasDe(baseProy, i); c.ejec[i] = lineasDe(baseEjec, i); });
+    return c;
+  }, [baseProy, baseEjec, tasaPart, tasaIR]);
+  const valor = (tipo, clave, i) => cacheLineas[tipo][i][clave];
 
   const celdasGrupo = (linea, i) => {
     const esPct = linea.estilo === 'pct';
-    const p = valor(proy, linea.clave, i);
-    const e = estadoEjec === 'ok' ? valor(ejec, linea.clave, i) : null;
+    const p = valor('proy', linea.clave, i);
+    const e = estadoEjec === 'ok' ? valor('ejec', linea.clave, i) : null;
     const variacion = e === null || p === null ? null : e - p;
     const varPct = !esPct && variacion !== null && p ? variacion / Math.abs(p) : null;
-    const bueno = variacion === null ? null : variacion >= 0;
+    // Ingresos/utilidades: mejor si sube. Costos/gastos: mejor si baja.
+    const bueno = variacion === null ? null : (linea.favorable === 'menor' ? variacion <= 0 : variacion >= 0);
     const fmt = esPct ? pct : miles;
     const td = { padding: '4px 8px', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid #e2e8f0', fontSize: '11px' };
     return (
@@ -90,8 +100,8 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
     const filas = LINEAS_EERR.map(l => [
       `"${l.id}. ${l.nombre}"`,
       ...grupos.flatMap(g => {
-        const p = valor(proy, l.clave, g.i);
-        const e = estadoEjec === 'ok' ? valor(ejec, l.clave, g.i) : null;
+        const p = valor('proy', l.clave, g.i);
+        const e = estadoEjec === 'ok' ? valor('ejec', l.clave, g.i) : null;
         const f = (v) => (v === null || v === undefined ? '' : v.toFixed(4));
         return [f(p), f(e), e === null || p === null ? '' : f(e - p)];
       })
@@ -166,9 +176,9 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
         </table>
       </div>
       <div style={{ fontSize: '10px', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-        <b>Proyectado:</b> ventas y costo del Forecast (costo unitario del costeo de cada producto, sin embalaje) + gastos registrados por área (94 Adm., 95 Comercial, 98 Logística, 99 Almacén; base 68 = Depre&Amort).
-        {' '}<b>Ejecutado:</b> asientos publicados en Odoo (70 ventas, 74 dsctos, 69 costo, 75 otros ing., 77/67 financieros, 776/676 dif. cambio, 9x por área).
-        {' '}Participación e IR se calculan con las tasas indicadas cuando no hay cuentas 87/88. Variación = Ejecutado − Proyectado.
+        Mismas fórmulas que el Power BI (saldo = debe − haber): Ventas ABS(70) · Dscto 74 · Costo 69 · Gastos 9x62–9x65 (98 Log., 99 Alm., 95 Com., 94 Adm.) · Depre 9x68 · Otros Ing ABS(75, 775, 7611) · IngFinan ABS(7792) · GastFinan 976711/97673/976793 · DifCamb −(776, 97676) · Participación e IR = tasa × utilidad.
+        {' '}<b>Proyectado:</b> ventas y costo del Forecast (costo unitario del costeo del producto) + gastos registrados en el sistema. <b>Ejecutado:</b> asientos publicados en Odoo.
+        {' '}Variación = Ejecutado − Proyectado; verde = favorable (más ingreso/utilidad o menos costo/gasto).
       </div>
     </div>
   );
