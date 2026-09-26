@@ -17,14 +17,6 @@ const fmt = (v, d = 2) => (Math.abs(num(v)) < 1e-9 ? '—' : num(v).toLocaleStri
 const fmtQ = (v) => (Math.abs(num(v)) < 0.5 ? '—' : Math.round(num(v)).toLocaleString('en-US'));
 const slug = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 
-// Unidad comercial -> crisoles (Caja/Bx = 25; "x 50" = 50; lo demás = 1).
-const factorUnidad = (um) => {
-  const u = String(um || '').toLowerCase().trim();
-  if (u === 'bx' || u === 'box' || u === 'caja') return 25;
-  const m = u.match(/(\d+)/);
-  return m ? parseInt(m[1], 10) : 1;
-};
-
 // El año se elige arriba; al cambiarlo se vuelve a montar el tablero con lo guardado de ese año.
 export default function CosteoCrisolesTablero(props) {
   const [anio, setAnio] = useState(String(ANIO_ACTUAL));
@@ -48,9 +40,9 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
     const mapa = {};
     listarForecastComercial(idVersion).forEach(f => {
       if (f.unidad_negocio !== 'Crisoles de Arcilla' || String(f.anio_proyeccion) !== anio) return;
-      const factor = factorUnidad(f.um);
+      // Las cantidades del forecast ya están en unidades (el precio es por crisol aunque la UM diga "Bx").
       if (!mapa[f.producto]) mapa[f.producto] = Array(12).fill(0);
-      MESES_COSTEO.forEach((m, i) => { mapa[f.producto][i] += num(f.cantidades?.[m]) * factor; });
+      MESES_COSTEO.forEach((m, i) => { mapa[f.producto][i] += num(f.cantidades?.[m]); });
     });
     return mapa;
   }, [idVersion, anio]);

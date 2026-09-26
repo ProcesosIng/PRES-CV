@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { listarRegistros, guardarRegistrosLote } from '../../data/store';
 import { prefijoDeArea } from '../../config/areas';
+import { MODULO_DISTRIBUCION_CALIDAD, DESTINOS_CALIDAD as DESTINOS, generarDistribucionCalidad, lineasDeRegistro as lineasDe } from '../../config/distribucionCalidad';
 
 // =====================================================================
 // DISTRIBUCIÓN DE CALIDAD
@@ -11,26 +12,11 @@ import { prefijoDeArea } from '../../config/areas';
 //  - Comercial: gasto normal del mismo módulo.
 // Cambiar porcentajes o registros de Calidad requiere volver a aplicar (se regenera todo).
 // =====================================================================
-export const MODULO_DISTRIBUCION_CALIDAD = 'Distribución de Calidad';
-const DESTINOS = ['Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Comercial'];
+export { MODULO_DISTRIBUCION_CALIDAD };
 const ES_PRODUCCION = (a) => a.startsWith('Producción');
 
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 const fmt = (v) => num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const conPrefijo = (cuenta, prefijo) => {
-  const t = String(cuenta || '').trim();
-  const m = t.match(/^(\d+)\s*(?:-\s*)?(.*)$/);
-  if (!m) return t;
-  const base = m[1].length > 7 ? m[1].slice(-7) : m[1];
-  return `${prefijo}${base}${m[2] ? ` - ${m[2]}` : ''}`;
-};
-const lineasDe = (r) => {
-  const dc = r.detalle_columnas || {};
-  const d = Array.isArray(r.desglose_contable) ? r.desglose_contable.filter(x => x && (x.cuenta || x.monto)) : [];
-  return d.length ? d.map(x => ({ cuenta: x.cuenta, monto: num(x.monto) }))
-    : [{ cuenta: dc.cuenta_afectada || dc.numero_cuenta || '', monto: num(r.totales?.costo_total ?? dc.costo_total) }];
-};
-
 export default function DistribucionCalidad({ idVersion, usuario }) {
   const [recarga, setRecarga] = useState(0);
   const config = useMemo(
@@ -64,71 +50,14 @@ export default function DistribucionCalidad({ idVersion, usuario }) {
   }, [gastosCalidad]);
   const totalCalidad = porModulo.reduce((a, [, v]) => a + v, 0);
 
-  const registroConfig = (activar) => ({
-    id_registro: `DIST-CAL-CFG-${idVersion}`,
-    id_lote: `DIST-CAL-${idVersion}`,
-    id_version: idVersion,
-    idVersion,
-    area: 'Calidad',
-    modulo: MODULO_DISTRIBUCION_CALIDAD,
-    categoria: MODULO_DISTRIBUCION_CALIDAD,
-    fecha_proyeccion: config?.fecha_proyeccion || `${new Date().getFullYear()}-01-01`,
-    empleado_dni: '-',
-    empleado_nombre: 'Distribución de Calidad',
-    detalle_columnas: {
-      porcentajes: DESTINOS.reduce((a, d) => ({ ...a, [d]: num(porcentajes[d]) }), {}),
-      activo: activar,
-      aplicado_en: activar ? new Date().toISOString() : null,
-      aplicado_por: usuario?.email || null,
-    },
-    totales: { costo_total: 0 },
-  });
-
   // Genera (o quita) los gastos de Calidad en cada destino. Todo en un solo lote que se reemplaza completo.
   const guardar = (activar) => {
     if (activar && !sumaOk) return alert(`Los porcentajes deben sumar 100% (hoy suman ${suma.toFixed(2)}%).`);
-    const derivados = [];
-    if (activar) {
-      gastosCalidad.forEach(r => {
-        DESTINOS.forEach(destino => {
-          const pct = num(porcentajes[destino]) / 100;
-          if (pct <= 0) return;
-          const prefijo = prefijoDeArea(destino);
-          const lineas = lineasDe(r).map((l, i) => ({ id: `cal-${i}`, cuenta: conPrefijo(l.cuenta, prefijo), monto: (l.monto * pct).toFixed(2) }));
-          const total = lineas.reduce((a, l) => a + num(l.monto), 0);
-          if (!total) return;
-          const dc = r.detalle_columnas || {};
-          derivados.push({
-            id_registro: `DERIV-CAL-${r.id_registro}-${prefijo}`,
-            id_lote: `DIST-CAL-${idVersion}`,
-            id_version: idVersion,
-            idVersion,
-            area: destino,
-            modulo: r.modulo,
-            categoria: r.modulo,
-            fecha_proyeccion: r.fecha_proyeccion,
-            empleado_dni: r.empleado_dni || '-',
-            empleado_nombre: r.empleado_nombre || 'CALIDAD',
-            detalle_columnas: {
-              area: destino,
-              detalle: `CALIDAD (${(pct * 100).toFixed(2)}%) - ${dc.detalle || r.empleado_nombre || r.modulo}`,
-              cuenta_afectada: lineas[0]?.cuenta,
-              costo_total: total,
-              ...(ES_PRODUCCION(destino) ? { proceso: 'CIF' } : {}),
-              es_derivado: true,
-              origen_calidad: r.id_registro,
-              porcentaje_calidad: pct * 100,
-            },
-            desglose_contable: lineas,
-            totales: { costo_total: total },
-          });
-        });
-      });
-    }
-    guardarRegistrosLote([registroConfig(activar), ...derivados]);
+    const lote = generarDistribucionCalidad({ idVersion, gastosCalidad, porcentajes, activar, usuario, fechaBase: config?.fecha_proyeccion });
+    guardarRegistrosLote(lote);
     setRecarga(n => n + 1);
     alert(activar
-      ? `Distribución aplicada: ${derivados.length} registros generados en los módulos de ${DESTINOS.filter(d => num(porcentajes[d]) > 0).join(', ')}.`
+      ? `Distribución aplicada: ${lote.length - 1} registros generados en los módulos de ${DESTINOS.filter(d => num(porcentajes[d]) > 0).join(', ')}.`
       : 'Distribución desactivada: los gastos de Calidad ya no se reparten.');
   };
 

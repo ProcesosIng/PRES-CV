@@ -559,6 +559,37 @@ function crearRouterPresupuesto(pool) {
     res.json(r.rows);
   }));
 
+  // ---------- IMPORTAR DESDE EXCEL (administrador), en partes ----------
+  // La parte 0 elimina (borrado lógico) lo cargado antes con el mismo id_lote en esa versión,
+  // así volver a importar el mismo archivo no duplica. Cada parte se guarda en su propia transacción.
+  router.post('/presupuesto/importar-excel', soloAdmin, manejar(async (req, res) => {
+    const { id_version, id_lote, parte = 0, total_partes = 1, registros = [], archivo = '' } = req.body || {};
+    if (!id_version || !id_lote) throw new ErrorApi(400, 'Faltan id_version o id_lote');
+    if (!Array.isArray(registros)) throw new ErrorApi(400, 'registros debe ser una lista');
+    const ctx = ctxDe(req);
+    const resumen = await conTransaccion(pool, async (cx) => {
+      await verificarVersionExiste(cx, id_version);
+      let retirados = 0;
+      if (Number(parte) === 0) {
+        const r = await cx.query(
+          `UPDATE ppto_registros SET eliminado = true, eliminado_por = $3, eliminado_en = now(), rev = rev + 1
+            WHERE id_version = $1 AND id_lote = $2 AND NOT eliminado`,
+          [id_version, id_lote, ctx.usuario]
+        );
+        retirados = r.rowCount;
+      }
+      for (const r of registros) {
+        await upsertRegistro(cx, { ...r, id_version, id_lote }, ctx, { verificarRev: false, conAuditoria: false, permitirDerivado: true });
+      }
+      if (Number(parte) === Number(total_partes) - 1 || Number(parte) === 0) {
+        await auditar(cx, { ...ctx, accion: 'IMPORTAR', tabla: 'ppto_registros', id_objeto: id_lote, id_version,
+          detalle: `Excel ${archivo}: parte ${Number(parte) + 1}/${total_partes}${retirados ? `, ${retirados} registros anteriores retirados` : ''}` });
+      }
+      return { guardados: registros.length, retirados };
+    });
+    res.json(resumen);
+  }));
+
   // ---------- IMPORTAR lo que había en localStorage (una sola vez por navegador) ----------
   router.post('/presupuesto/importar', soloAdmin, manejar(async (req, res) => {
     const { versiones = [], registros = [] } = req.body || {};

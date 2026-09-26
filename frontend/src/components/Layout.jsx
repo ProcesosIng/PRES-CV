@@ -91,6 +91,9 @@ export default function Layout({
             <div className="nav-item" onClick={() => navegar('admin_actividad')}>
               <span className="nav-icon">📊</span> Análisis de uso
             </div>
+            <div className="nav-item" onClick={() => navegar('admin_importar')}>
+              <span className="nav-icon">📥</span> Importar Excel
+            </div>
             </>
           )}
         </nav>

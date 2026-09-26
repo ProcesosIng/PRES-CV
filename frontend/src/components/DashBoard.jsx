@@ -19,6 +19,7 @@ import AdminUsuarios from './admin/AdminUsuarios';
 import DistribucionCalidad, { MODULO_DISTRIBUCION_CALIDAD } from './modulos/DistribucionCalidad';
 import CosteoCrisolesTablero from './modulos/CosteoCrisolesTablero';
 import AdminActividad from './admin/AdminActividad';
+import ImportarExcel from './admin/ImportarExcel';
 
 const FILAS_ESPECIFICAS = {
   'Remuneraciones': RemuneracionesFila,
@@ -751,6 +752,7 @@ export default function Dashboard({
       {/* ADMINISTRACIÓN: usuarios/permisos y análisis de uso (solo administradores) */}
       {usuario.esAdmin && vistaActual === 'admin_usuarios' && <AdminUsuarios usuarioActual={usuario} />}
       {usuario.esAdmin && vistaActual === 'admin_actividad' && <AdminActividad />}
+      {usuario.esAdmin && vistaActual === 'admin_importar' && <ImportarExcel />}
 
       {/* VISTA MAESTROS (solo administradores) */}
       {usuario.esAdmin && vistaActual.startsWith('maestros_') && (
