@@ -15,6 +15,8 @@ import CosteoCopelasFila from './modulos/CosteoCopelasTabla';
 import TablaGenerica from './common/TablaGenerica';
 import Offcanvas from './Offcanvas';
 import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
+import AdminUsuarios from './admin/AdminUsuarios';
+import AdminActividad from './admin/AdminActividad';
 
 const FILAS_ESPECIFICAS = {
   'Remuneraciones': RemuneracionesFila,
@@ -711,6 +713,7 @@ export default function Dashboard({
               area={areaSeleccionada}
               registroParaVer={registroSeleccionado}
               modo={modoAccion}
+              usuario={usuario}
               onGuardado={() => {
                 // Aseguramos que se guarden y recarguen los registros al instante
                 recargarRegistros(); 
@@ -721,8 +724,12 @@ export default function Dashboard({
         </section>
       )}
 
-      {/* VISTA MAESTROS */}
-      {vistaActual.startsWith('maestros_') && (
+      {/* ADMINISTRACIÓN: usuarios/permisos y análisis de uso (solo administradores) */}
+      {usuario.esAdmin && vistaActual === 'admin_usuarios' && <AdminUsuarios usuarioActual={usuario} />}
+      {usuario.esAdmin && vistaActual === 'admin_actividad' && <AdminActividad />}
+
+      {/* VISTA MAESTROS (solo administradores) */}
+      {usuario.esAdmin && vistaActual.startsWith('maestros_') && (
         <section style={{ flex: 1, padding: '24px', maxWidth: '100vw', boxSizing: 'border-box', overflowX: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <button onClick={() => { setVistaActual('areas'); setAreaSeleccionada(''); setCategoriaSeleccionada(''); }} className="btn-back">

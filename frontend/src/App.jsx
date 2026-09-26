@@ -4,9 +4,10 @@ import SelectorVersiones from './components/SelectorVersiones';
 import Dashboard from './components/DashBoard';
 import Layout from './components/Layout';
 import {
-  inicializarDatos, estadoConexion, establecerUsuarioSesion,
+  inicializarDatos, estadoConexion,
   hayDatosLocalesParaImportar, importarDatosLocales, descartarImportacionLocal,
 } from './data/store';
+import { restaurarSesion, cerrarSesion, iniciarLatido, detenerLatido, registrarVista } from './data/auth';
 
 // Aviso fijo arriba: modo local (sin servidor), cambios pendientes de guardar
 // o datos antiguos del navegador que aún no se subieron a la base de datos.
@@ -42,13 +43,46 @@ export default function App() {
   const [areaSeleccionada, setAreaSeleccionada] = useState('');
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
 
+  const [verificandoSesion, setVerificandoSesion] = useState(true);
+  const [mensajeLogin, setMensajeLogin] = useState('');
   const [cargando, setCargando] = useState(true);
   const [estado, setEstado] = useState(estadoConexion());
   const [recargas, setRecargas] = useState(0); // fuerza a releer la caché tras recargar del servidor
   const [importando, setImportando] = useState(false);
 
+  // 1. ¿Vuelve de Microsoft o ya tenía sesión en esta pestaña?
   useEffect(() => {
+    restaurarSesion()
+      .then(u => { if (u) setUsuarioActual(u); })
+      .catch(e => setMensajeLogin(e.message))
+      .finally(() => setVerificandoSesion(false));
+    // El backend cerró la sesión (vencida, inactividad o acceso revocado): volver al login.
+    const alExpirar = (e) => {
+      detenerLatido();
+      setUsuarioActual(null);
+      setVersionActiva(null);
+      setMensajeLogin(e.detail?.mensaje || 'La sesión expiró.');
+    };
+    window.addEventListener('auth:expirada', alExpirar);
+    return () => window.removeEventListener('auth:expirada', alExpirar);
+  }, []);
+
+  // 2. Con sesión: se cargan los datos que el usuario puede ver y se empieza a medir el uso.
+  useEffect(() => {
+    if (!usuarioActual) return;
+    setCargando(true);
     inicializarDatos().then(() => setCargando(false));
+    iniciarLatido();
+  }, [usuarioActual]);
+
+  // Pantalla abierta, para el análisis de uso.
+  useEffect(() => {
+    if (!usuarioActual) return;
+    const pantalla = !versionActiva ? 'versiones' : vistaActual;
+    registrarVista({ pantalla, area: areaSeleccionada || null, modulo: categoriaSeleccionada || null });
+  }, [usuarioActual, versionActiva, vistaActual, areaSeleccionada, categoriaSeleccionada]);
+
+  useEffect(() => {
     const alCambiarEstado = (e) => setEstado(e.detail);
     const alRecargar = () => setRecargas(n => n + 1);
     window.addEventListener('presupuesto:estado', alCambiarEstado);
@@ -59,10 +93,15 @@ export default function App() {
     };
   }, []);
 
-  // TEMPORAL hasta el login con Microsoft: identifica quién hace cada cambio.
-  useEffect(() => {
-    establecerUsuarioSesion(usuarioActual ? (usuarioActual.email || usuarioActual.nombre) : '');
-  }, [usuarioActual]);
+  const salir = async () => {
+    await cerrarSesion();
+    setUsuarioActual(null);
+    setVersionActiva(null);
+    setVistaActual('areas');
+    setAreaSeleccionada('');
+    setCategoriaSeleccionada('');
+    setMensajeLogin('');
+  };
 
   const handleImportar = async () => {
     setImportando(true);
@@ -82,15 +121,17 @@ export default function App() {
     }
   };
 
-  const aviso = <AvisoConexion estado={estado} onImportar={handleImportar} onDescartar={handleDescartar} importando={importando} puedeImportar={!!usuarioActual} />;
+  const aviso = <AvisoConexion estado={estado} onImportar={handleImportar} onDescartar={handleDescartar} importando={importando} puedeImportar={!!usuarioActual?.esAdmin} />;
 
-  if (cargando) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'sans-serif' }}>Cargando datos del presupuesto...</div>;
-  }
+  const pantallaEspera = (texto) => <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontFamily: 'sans-serif' }}>{texto}</div>;
+
+  if (verificandoSesion) return pantallaEspera('Verificando sesión...');
 
   if (!usuarioActual) {
-    return <>{aviso}<Login setUsuarioActual={setUsuarioActual} /></>;
+    return <Login onIngresar={(u) => { setMensajeLogin(''); setUsuarioActual(u); }} mensaje={mensajeLogin} />;
   }
+
+  if (cargando) return pantallaEspera('Cargando datos del presupuesto...');
 
   // 2. Si YA HAY usuario pero NO hay versión seleccionada, muestra el Selector
   if (!versionActiva) {
@@ -101,7 +142,7 @@ export default function App() {
           key={recargas}
           usuario={usuarioActual}
           onSeleccionarVersion={(idVersion) => setVersionActiva(idVersion)}
-          onLogout={() => setUsuarioActual(null)}
+          onLogout={salir}
         />
       </>
     );
@@ -112,7 +153,7 @@ export default function App() {
       {aviso}
       <Layout
         usuario={usuarioActual}
-        setUsuarioActual={setUsuarioActual}
+        onCerrarSesion={salir}
         setVistaActual={setVistaActual}
         areaSeleccionada={areaSeleccionada}
         categoriaSeleccionada={categoriaSeleccionada}
