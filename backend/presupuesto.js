@@ -56,8 +56,11 @@ const usuarioDe = (req) => req.usuario.email;
 const ipDe = (req) => req.usuario?.ip || req.socket?.remoteAddress || null;
 
 // Derivado que un costeo de embalajes (Logística) deja en la cuenta de embalaje de un centro de producción.
+// También los gastos de Calidad repartidos por su Distribución a Crisoles, Fundente, Copelas y Comercial.
+const DESTINOS_CALIDAD = ['Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Comercial'];
 const derivadoPermitido = (ctx, r) => puedeEditarArea(ctx.quien, r.area)
-  || (ctx.embalaje && String(r.area || '').startsWith('Producción') && r.modulo === 'Envases y Embalajes');
+  || (ctx.embalaje && String(r.area || '').startsWith('Producción') && r.modulo === 'Envases y Embalajes')
+  || (ctx.calidad && DESTINOS_CALIDAD.includes(r.area) && String(r.id_registro || '').startsWith('DERIV-CAL-'));
 
 // Un usuario de área solo crea, edita o elimina registros de sus áreas.
 function exigirArea(ctx, area, idRegistro) {
@@ -165,7 +168,8 @@ async function guardarForecastMensual(cx, r, cab) {
     const costo = esperada * costoU;
     return [r.id_registro, r.id_version, anio, i + 1, dc.unidad_negocio || null, dc.codigo_producto || null, dc.producto || null,
       dc.presentacion_fundente || null, dc.cliente || null, dc.tipo_cliente || null, dc.vendedor || null, dc.zona || null, dc.pais || null,
-      dc.um || null, moneda, tc, cantidad, prob, esperada, precio, costoU, ingreso, costo, ingreso - costo, ingreso * tc, costo * tc, (ingreso - costo) * tc];
+      dc.um || null, moneda, tc, cantidad, prob, esperada, precio, costoU, ingreso, costo, ingreso - costo, ingreso * tc, costo * tc, (ingreso - costo) * tc,
+      dc.tipo_negocio || null, dc.cuenta_venta || null, dc.cuenta_costo || null];
   }).filter(f => f[16] !== 0);
   if (filas.length === 0) return;
 
@@ -174,7 +178,7 @@ async function guardarForecastMensual(cx, r, cab) {
   await cx.query(
     `INSERT INTO ppto_forecast_mensual (id_registro, id_version, anio, mes, unidad_negocio, codigo_producto, producto, presentacion, cliente, tipo_cliente,
        vendedor, zona, pais, um, moneda, tipo_cambio, cantidad, probabilidad, cantidad_esperada, precio_venta, costo_unitario, ingreso, costo, margen,
-       ingreso_soles, costo_soles, margen_soles)
+       ingreso_soles, costo_soles, margen_soles, tipo_negocio, cuenta_venta, cuenta_costo)
      VALUES ${valores.join(',')}`,
     filas.flat()
   );
@@ -471,6 +475,7 @@ function crearRouterPresupuesto(pool) {
     if (principales.length === 0) throw new ErrorApi(400, 'El lote no tiene registro principal');
     principales.forEach(r => exigirArea(ctx, r.area, r.id_registro));
     ctx.embalaje = principales.every(r => r.modulo === 'Costeo de Embalajes');
+    ctx.calidad = principales.every(r => r.modulo === 'Distribución de Calidad' && r.area === 'Calidad');
     registros.filter(esDerivado).forEach(r => { if (!derivadoPermitido(ctx, r)) exigirArea(ctx, r.area, r.id_registro); });
     const filas = await conTransaccion(pool, async (cx) => {
       const versiones = new Set(registros.map(r => r.id_version || r.idVersion));
@@ -552,6 +557,37 @@ function crearRouterPresupuesto(pool) {
       params
     );
     res.json(r.rows);
+  }));
+
+  // ---------- IMPORTAR DESDE EXCEL (administrador), en partes ----------
+  // La parte 0 elimina (borrado lógico) lo cargado antes con el mismo id_lote en esa versión,
+  // así volver a importar el mismo archivo no duplica. Cada parte se guarda en su propia transacción.
+  router.post('/presupuesto/importar-excel', soloAdmin, manejar(async (req, res) => {
+    const { id_version, id_lote, parte = 0, total_partes = 1, registros = [], archivo = '' } = req.body || {};
+    if (!id_version || !id_lote) throw new ErrorApi(400, 'Faltan id_version o id_lote');
+    if (!Array.isArray(registros)) throw new ErrorApi(400, 'registros debe ser una lista');
+    const ctx = ctxDe(req);
+    const resumen = await conTransaccion(pool, async (cx) => {
+      await verificarVersionExiste(cx, id_version);
+      let retirados = 0;
+      if (Number(parte) === 0) {
+        const r = await cx.query(
+          `UPDATE ppto_registros SET eliminado = true, eliminado_por = $3, eliminado_en = now(), rev = rev + 1
+            WHERE id_version = $1 AND id_lote = $2 AND NOT eliminado`,
+          [id_version, id_lote, ctx.usuario]
+        );
+        retirados = r.rowCount;
+      }
+      for (const r of registros) {
+        await upsertRegistro(cx, { ...r, id_version, id_lote }, ctx, { verificarRev: false, conAuditoria: false, permitirDerivado: true });
+      }
+      if (Number(parte) === Number(total_partes) - 1 || Number(parte) === 0) {
+        await auditar(cx, { ...ctx, accion: 'IMPORTAR', tabla: 'ppto_registros', id_objeto: id_lote, id_version,
+          detalle: `Excel ${archivo}: parte ${Number(parte) + 1}/${total_partes}${retirados ? `, ${retirados} registros anteriores retirados` : ''}` });
+      }
+      return { guardados: registros.length, retirados };
+    });
+    res.json(resumen);
   }));
 
   // ---------- IMPORTAR lo que había en localStorage (una sola vez por navegador) ----------

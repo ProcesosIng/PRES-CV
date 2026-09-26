@@ -1,8 +1,10 @@
 // =====================================================================
 // REPORTE DE GASTOS: Proyectado (sistema) vs Ejecutado (Odoo).
 //
-// Solo cuentas de destino (clase 9): los 2 primeros dígitos son el ÁREA y el resto
-// es la cuenta base del Plan Contable (p. ej. 946251000 = Administración + 6251000).
+// Solo cuentas de destino de un ÁREA: 2 dígitos de área (91-95, 98, 99) + cuenta de gasto
+// de la clase 6 (p. ej. 946251000 = Administración + 6251000).
+// No entran: las 97 (gastos financieros y diferencia de cambio, van solo al EERR) ni las
+// cuentas de agrupación como 910000000 / 940000000.
 // El ID, GRUPO y SUBGRUPO salen del maestro de cuentas (asignación manual) o, si falta, del Excel por cuenta base.
 //
 // Signos: los gastos se muestran en NEGATIVO; Variación = Ejecutado - Proyectado
@@ -17,7 +19,6 @@ export const AREAS_POR_PREFIJO = {
   '93': 'Producción Copelas',
   '94': 'Administración',
   '95': 'Comercial',
-  '97': 'Gastos Financieros',
   '98': 'Logística',
   '99': 'Almacén',
 };
@@ -29,18 +30,19 @@ const SIN_CLASIFICAR = { id: 'Sin ID', grupo: 'Z. SIN CLASIFICAR', subgrupo: '99
 
 // clasificacionMaestro: { '946251000': { id, grupo, subgrupo } } armado desde el maestro de cuentas.
 // Devuelve { area, base, id, grupo, subgrupo } o null si no es una cuenta de gasto por destino (clase 9).
-export function clasificarGasto(codigo, areaRespaldo = '', clasificacionMaestro = {}) {
+export function clasificarGasto(codigo, clasificacionMaestro = {}) {
   const c = String(codigo || '').replace(/\D/g, '');
-  if (!c.startsWith('9') || c.length < 5) return null;
+  if (c.length < 5) return null;
   const prefijo = c.slice(0, 2);
   const base = c.slice(2);
+  if (!AREAS_POR_PREFIJO[prefijo] || !base.startsWith('6')) return null;
   const delMaestro = clasificacionMaestro[c];
   const delExcel = CLASIFICACION_BASE[base];
   const cls = (delMaestro && delMaestro.grupo)
     ? delMaestro
     : (delExcel ? { id: delExcel[0], grupo: delExcel[1], subgrupo: delExcel[2] } : SIN_CLASIFICAR);
   return {
-    area: AREAS_POR_PREFIJO[prefijo] || areaRespaldo || `Destino ${prefijo}`,
+    area: AREAS_POR_PREFIJO[prefijo],
     base,
     id: cls.id || SIN_CLASIFICAR.id,
     grupo: cls.grupo || SIN_CLASIFICAR.grupo,
@@ -79,7 +81,7 @@ export function movimientosProyectados(registros, { idVersion, anio }, clasifica
     lineas.forEach(l => {
       const texto = String(l.cuenta || '');
       const codigo = texto.split(/\s/)[0];
-      const cls = clasificarGasto(codigo, r.area, clasificacionMaestro);
+      const cls = clasificarGasto(codigo, clasificacionMaestro);
       if (!cls || !l.monto) return;
       const nombre = texto.includes(' - ') ? texto.slice(texto.indexOf(' - ') + 3) : '';
       salida.push({ ...cls, codigo, nombre, mes: f.mes, proyectado: -l.monto, ejecutado: 0 });
@@ -92,9 +94,9 @@ export function movimientosProyectados(registros, { idVersion, anio }, clasifica
 export function movimientosEjecutados(filasOdoo, clasificacionMaestro = {}) {
   const salida = [];
   (filasOdoo || []).forEach(f => {
-    const cls = clasificarGasto(f.codigo, '', clasificacionMaestro);
+    const cls = clasificarGasto(f.codigo, clasificacionMaestro);
     const mes = (parseInt(f.mes, 10) || 0) - 1;
-    if (!cls || mes < 0 || mes > 11) return;
+    if (!cls || mes < 0 || mes > 11 || Math.abs(num(f.saldo)) < 0.005) return;
     salida.push({ ...cls, codigo: String(f.codigo), nombre: '', mes, proyectado: 0, ejecutado: -num(f.saldo) });
   });
   return salida;

@@ -1,25 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MESES, PROCESOS_PRODUCTIVOS } from '../../config/data';
+import { prefijoDeArea, procesosDeArea, etiquetaProceso } from '../../config/areas';
+import { MESES } from '../../config/data';
 import { obtenerCuentasOdoo } from '../../data/store';
 import { formatearCuentaContable } from '../../config/cuentas';
 
 const FRECUENCIAS = ['Mensual', 'Trimestral', 'Semestral', 'Anual'];
 
-const prefijosPorArea = {
-  'administración': '94',
-  'administracion': '94',
-  'comercial': '95',
-  'logística': '98',
-  'logistica': '98',
-  'almacén': '99',
-  'almacen': '99',
-  'producción crisoles': '91',
-  'produccion crisoles': '91',
-  'producción fundente': '92',
-  'produccion fundente': '92',
-  'producción': '91',
-  'produccion': '91'
-};
 
 export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar, modo, idVersion, area }) {
   const isSoloLectura = modo === 'ver';
@@ -65,7 +51,7 @@ export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar,
   const [selectorCuentaAbierto, setSelectorCuentaAbierto] = useState(null); // null | 'mantenimiento' | 'depreciacion'
 
   const areaNormalizada = (areaSel || area || '').toLowerCase().trim();
-  const prefijoArea = prefijosPorArea[areaNormalizada] || '';
+  const prefijoArea = prefijoDeArea(areaNormalizada);
 
   // CARGA EN VIVO DESDE ODOO
   useEffect(() => {
@@ -483,7 +469,7 @@ export default function PlanMantenimientoForm({ registro, onGuardar, onCancelar,
                 <select value={proceso} onChange={e => setProceso(e.target.value)}
                   style={{ width: '100%', padding: '8px', border: '1px solid var(--line, #cbd5e1)', borderRadius: '4px' }}>
                   <option value="">-- Seleccione --</option>
-                  {PROCESOS_PRODUCTIVOS.map((p, idxProc) => <option key={`proc-${idxProc}-${p}`} value={p}>{p}</option>)}
+                  {procesosDeArea(area).map(p => <option key={p} value={p}>{etiquetaProceso(p)}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{ margin: 0 }}>

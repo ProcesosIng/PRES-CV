@@ -47,6 +47,11 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
   const [ordenGastos, setOrdenGastos] = useState({ columna: 'total', direccion: 'desc' });
   const [ordenCompras] = useState({ columna: 'fecha', direccion: 'asc' });
 
+  const calidadRepartida = useMemo(
+    () => new Set(registrosTotales.map(r => r.detalle_columnas?.origen_calidad).filter(Boolean)),
+    [registrosTotales]
+  );
+
   const versionesDisponibles = useMemo(() => {
     try {
       return listarVersiones();
@@ -61,6 +66,8 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
       const dc = reg.detalle_columnas || {};
 
       if (PESTANAS_SOLO_GASTOS.includes(tipoReporte) && esForecastOCosteo(reg.modulo)) return false;
+      // Calidad: cuando su gasto ya fue repartido a otras áreas, solo cuenta lo repartido (no el original).
+      if (reg.modulo === 'Distribución de Calidad' || calidadRepartida.has(reg.id_registro)) return false;
 
       if (omitir !== 'version' && filtroVersion && reg.id_version !== filtroVersion) return false;
       // Cada filtro solo aplica en las pestañas donde se muestra.

@@ -29,7 +29,7 @@ export const PROCESOS_FUNDENTE = ['Granel', 'Sachet'];
 // "PRODUCTO" del Excel de forecast). Se usan como select en el formulario
 // de Forecast de Ventas, y Costeo de Crisoles/Fundente filtran por estos
 // valores exactos ('CCS' y 'Fundente').
-export const UNIDADES_NEGOCIO = ['CCS', 'Carbon Activado', 'Epp', 'Copelas', 'Bolas de acero', 'Crisoles de Arcilla', 'Fundente', 'Floculantes', 'Insumos'];
+export const UNIDADES_NEGOCIO = ['CCS', 'Carbon Activado', 'Epp', 'Copelas', 'Bolas de acero', 'Crisoles de Arcilla', 'Fundente', 'Floculantes', 'Insumos', 'Polvo Zn', 'Equipos', 'Servicios'];
 
 export const TIPOS_CLIENTE = ['Minera', 'Distribuidor', 'Laboratorio', 'Manufactura'];
 export const TIPOS_ZONA = ['Local', 'Exterior'];
@@ -267,6 +267,25 @@ export const configModulos = {
         { nombre: 'Costo Total (S/)', alinear: 'right' },
         { nombre: 'Acciones', alinear: 'center' }
       ],
+    },
+
+    // Personal externo pagado con recibo por honorarios (cuenta 6399000 con el prefijo del área).
+    'Personal Externo (RxH)': {
+      icono: '🧾',
+      columnasTabla: [
+        { nombre: 'Fecha / Mes', alinear: 'left' },
+        { nombre: 'Persona / Servicio', alinear: 'left' },
+        { nombre: 'Cuenta', alinear: 'left' },
+        { nombre: 'Proceso', alinear: 'left' },
+        { nombre: 'Costo Total (S/)', alinear: 'right' },
+        { nombre: 'Acciones', alinear: 'center' }
+      ],
+    },
+
+    // Calidad: porcentajes para repartir sus gastos a Crisoles, Fundente, Copelas y Comercial.
+    'Distribución de Calidad': {
+      icono: '⚖️',
+      columnasTabla: [],
     },
 
     // especifico

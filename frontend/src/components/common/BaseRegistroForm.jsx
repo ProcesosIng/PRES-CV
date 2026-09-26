@@ -1,35 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { prefijoDeArea, procesosDeArea, etiquetaProceso } from '../../config/areas';
 import {MESES } from '../../config/data';
 import { API_URL } from '../../config/api';
 
 // Diccionario normalizado a minúsculas para que coincida con .toLowerCase()
-const prefijosPorArea = {
-  'administración': '94',
-  'administracion': '94',
-  'comercial': '95',
-  'logística': '98',
-  'logistica': '98',
-  'almacén': '99',
-  'almacen': '99',
-  'producción crisoles': '91',
-  'produccion crisoles': '91',
-  'producción fundente': '92',
-  'produccion fundente': '92',
-  'producción': '91',
-  'produccion': '91',
-  'producción copelas': '93', 'produccion copelas': '93',
-};
 
-const AREAS = ['Administración', 'Comercial', 'Logística', 'Almacén', 'Producción Crisoles', 'Producción Fundente', 'Producción Copelas'];
+const AREAS = ['Administración', 'Comercial', 'Logística', 'Almacén', 'Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Calidad'];
 
 const normalizarArea = (a) => String(a || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-// Solo las áreas de producción tienen proceso. Vacío = CIF.
-const PROCESOS_POR_AREA = {
-  'produccion fundente': ['Granel', 'Sachet', 'CIF'],
-  'produccion crisoles': ['Primer Proceso', 'Segundo Proceso', 'CIF'],
-  'producción copelas': ['Primer Proceso', 'Segundo Proceso', 'CIF']
-};
 
 export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo, config, area }) {
   const isSoloLectura = modo === 'ver';
@@ -64,20 +43,15 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
   // Obtener el área activa y buscar en el diccionario normalizado
   const areaActual = datosAuto.area || area || '';
   const areaNormalizada = areaActual.toLowerCase().trim();
-  const prefijoArea = prefijosPorArea[areaNormalizada] || '';
+  const prefijoArea = prefijoDeArea(areaNormalizada);
 
-  const AREAS = ['Administración', 'Comercial', 'Logística', 'Almacén', 'Producción Crisoles', 'Producción Fundente', 'Producción Copelas'];
+  const AREAS = ['Administración', 'Comercial', 'Logística', 'Almacén', 'Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Calidad'];
 
   const normalizarArea = (a) => String(a || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-  // Solo las áreas de producción tienen proceso. Vacío = CIF.
-  const PROCESOS_POR_AREA = {
-    'produccion fundente': ['Granel', 'Sachet', 'CIF'],
-    'produccion crisoles': ['Primer Proceso', 'Segundo Proceso', 'CIF'],
-    'producción copelas': ['Primer Proceso', 'Segundo Proceso', 'CIF']
-  };
 
-  const opcionesProceso = PROCESOS_POR_AREA[normalizarArea(areaActual)] || [];
+  // Solo las áreas de producción tienen proceso ('CIF' = compartido entre procesos).
+  const opcionesProceso = procesosDeArea(areaActual);
   const opcionesArea = (!areaActual || AREAS.includes(areaActual)) ? AREAS : [areaActual, ...AREAS];   
 
   // Función robusta para aplicar el prefijo dinámico
@@ -142,7 +116,8 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
   useEffect(() => {
     // Si NO hay registro (es un registro nuevo), limpiamos la pantalla
     if (!registro) {
-      setDetalles([{ id: Date.now(), cuenta: '', detalle: '', monto: '' }]);
+      // Algunos módulos traen una cuenta sugerida (p. ej. Personal Externo -> 6399000); el prefijo del área se agrega al guardar.
+      setDetalles([{ id: Date.now(), cuenta: config?.cuentaSugerida || '', detalle: '', monto: '' }]);
       setFechasSeleccionadas([]);
       setValorBuscador('');
       setDatosAuto(prev => ({ ...prev, dni: '', dist: '100', area: area || '', proceso: '', cargo: 'Sin asignar' }));
@@ -536,7 +511,7 @@ export default function BaseRegistroForm({ registro, onGuardar, onCancelar, modo
                 onChange={(e) => setDatosAuto({ ...datosAuto, proceso: e.target.value })}
                 style={{ width: '100%', padding: '8px', border: '1px solid var(--line, #cbd5e1)', borderRadius: '4px', background: 'white' }}>
                 <option value="">{opcionesProceso.length === 0 ? 'No aplica' : '-- Seleccione --'}</option>
-                {opcionesProceso.map(p => <option key={p} value={p}>{p}</option>)}
+                {opcionesProceso.map(p => <option key={p} value={p}>{etiquetaProceso(p)}</option>)}
               </select>
             </div>
             
