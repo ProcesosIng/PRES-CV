@@ -5,9 +5,12 @@ import { listarLineasForecastParaEmbalaje, guardarRegistrosLote, obtenerProducto
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = Array.from({ length: 5 }, (_, i) => (ANIO_ACTUAL - 1 + i).toString());
 
-// El embalaje SIEMPRE va a la cuenta 6142000 (Envases y embalajes - Embalajes) del área de
-// Logística, con su prefijo 98: 986142000. No se asigna manualmente.
-const CUENTA_EMBALAJE_LOGISTICA = '986142000 - Envases y embalajes - Embalajes';
+// El embalaje se COSTEA en Logística, pero su costo pertenece a cada centro de producción:
+// va a la cuenta 6142000 (Envases y embalajes - Embalajes) con el prefijo del área de producción
+// de la línea costeada (Crisoles 91, Fundente 92, Copelas 93). No se asigna manualmente.
+const CUENTA_EMBALAJE_BASE = '6142000 - Envases y embalajes - Embalajes';
+const PREFIJO_POR_AREA = { 'Producción Crisoles': '91', 'Producción Fundente': '92', 'Producción Copelas': '93' };
+const cuentaEmbalajeDe = (areaProduccion) => `${PREFIJO_POR_AREA[areaProduccion] || ''}${CUENTA_EMBALAJE_BASE}`;
 const MODULO_DESTINO_EMBALAJE = 'Envases y Embalajes';
 const AREA_LOGISTICA = 'Logística';
 
@@ -149,6 +152,8 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
     const configGlobal = { capacidadPaletaLocal, capacidadPaletaExterior, insumos: insumosEmbalaje };
     // Lote fijo por línea + año: al volver a guardar se reemplaza solo el costeo de esa línea
     const areaDestino = LINEAS_PRODUCCION_EMBALAJE.find(l => l.unidadNegocio === lineaSel)?.area || '';
+    if (!PREFIJO_POR_AREA[areaDestino]) return alert(`No se encontró el centro de producción de la línea ${lineaSel}.`);
+    const cuentaEmbalaje = cuentaEmbalajeDe(areaDestino);
     const idLoteBase = `LOTE-EMB-${idVersion}-${lineaSel}-${anioSel}`;
 
     const registrosAGuardar = [];
@@ -159,11 +164,12 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
         .filter(d => d.costo > 0)
         .map((d, i) => ({
           id: `emb-${i}`,
-          cuenta: `${CUENTA_EMBALAJE_LOGISTICA} - ${d.insumo} (${linea.unidad_negocio})`,
+          cuenta: `${cuentaEmbalaje} - ${d.insumo} (${linea.unidad_negocio})`,
           monto: d.costo.toFixed(2)
         }));
 
-      // Registros derivados mes a mes en el módulo "Envases y Embalajes" de Logística (cuenta 986142000).
+      // Registros derivados mes a mes en el módulo "Envases y Embalajes" del CENTRO DE PRODUCCIÓN
+      // de la línea (p. ej. Producción Crisoles, cuenta 916142000).
       // El costo de cada insumo se reparte según el volumen de cada mes del forecast.
       const factor = obtenerFactorPorUnidad(linea.um);
       MESES.forEach((mes, iM) => {
@@ -178,13 +184,13 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
             id_lote: idLoteBase,
             modulo: MODULO_DESTINO_EMBALAJE,
             categoria: MODULO_DESTINO_EMBALAJE,
-            area: AREA_LOGISTICA,
+            area: areaDestino,
             idVersion,
             fecha_proyeccion: `${anioSel}-${String(iM + 1).padStart(2, '0')}-01`,
             empleado_dni: '-',
             empleado_nombre: `COSTEO EMBALAJE - ${d.insumo.toUpperCase()}`,
             detalle_columnas: {
-              cuenta_afectada: CUENTA_EMBALAJE_LOGISTICA,
+              cuenta_afectada: cuentaEmbalaje,
               producto: `${d.insumo.toUpperCase()} (${linea.producto})`,
               detalle: `${d.insumo.toUpperCase()} - Para: ${linea.producto} / ${linea.cliente} (${linea.zona})`,
               unidad_medida: 'unidad',
