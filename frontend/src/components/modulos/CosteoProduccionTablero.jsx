@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { listarForecastComercial, listarRegistros, listarTodosLosRegistros, guardarRegistrosLote } from '../../data/store';
-import { MESES_COSTEO, BLOQUES, PARAMETROS_POR_DEFECTO, costosDelArea, calcularCosteo, pesoSugerido } from '../../config/costeoCrisoles';
+import { MESES_COSTEO, BLOQUES, PARAMETROS_POR_DEFECTO, costosDelArea, calcularCosteo, pesoSugerido, claveProducto } from '../../config/costeoCrisoles';
+import { MODULO_REFERENCIA } from '../../config/importarProduccion';
 import { imprimirElemento } from '../../config/impresion';
 import { exportarTablasHtml } from '../../config/excel';
 
@@ -81,6 +82,29 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio, modulo = 'Costeo
     setAjustes(nuevos);
   };
   const quitarAjustes = () => setAjustes({});
+
+  // Costeo del Excel FP26 importado en esta versión (costo unitario y plan por tamaño) para comparar.
+  const referencia = useMemo(() => {
+    const r = listarRegistros({ idVersion, area, modulo: MODULO_REFERENCIA })
+      .find(x => String(x.detalle_columnas?.anio_proyeccion) === anio && Array.isArray(x.detalle_columnas?.productos));
+    return r ? r.detalle_columnas.productos : [];
+  }, [idVersion, area, anio]);
+
+  // Pone el plan de producto terminado del Excel en cada tamaño del forecast (para comparar igual con igual).
+  const usarPlanExcel = () => {
+    const nuevos = {};
+    const faltan = [];
+    referencia.forEach(r => {
+      const destino = productosForecast.filter(p => claveProducto(p) === claveProducto(r.producto, r.tamano));
+      if (!destino.length) { faltan.push(r.producto); return; }
+      destino.forEach((p, j) => { nuevos[p] = Object.fromEntries(MESES_COSTEO.map((_, i) => [i, String(j === 0 ? Math.round(num(r.pt?.[i])) : 0)])); });
+    });
+    const sinExcel = productosForecast.filter(p => !nuevos[p]);
+    sinExcel.forEach(p => { nuevos[p] = Object.fromEntries(MESES_COSTEO.map((_, i) => [i, '0'])); });
+    setAjustes(nuevos);
+    setParametros(prev => ({ ...prev, stockInicial: 0 }));
+    if (faltan.length || sinExcel.length) alert(`Plan del Excel aplicado.${faltan.length ? `\nSin producto en el forecast: ${faltan.join(', ')}.` : ''}${sinExcel.length ? `\nQuedan en 0 (no están en el Excel): ${sinExcel.join(', ')}.` : ''}`);
+  };
 
   const productos = productosForecast.filter(p => !excluidos.includes(p)).map(p => ({
     producto: p,
@@ -218,11 +242,12 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio, modulo = 'Costeo
             {puedeEditar && (
               <div style={{ display: 'flex', gap: '6px' }} data-no-print>
                 <button type="button" className="btn-ghost" onClick={nivelar} title="Promedio mensual del forecast por tamaño">⚖️ Nivelar producción</button>
+                {referencia.length > 0 && <button type="button" className="btn-ghost" onClick={usarPlanExcel} title="Producto terminado por tamaño del Excel FP26 (CosCris)">📄 Usar plan del Excel</button>}
                 {Object.keys(ajustes).length > 0 && <button type="button" className="btn-ghost" onClick={quitarAjustes}>↺ Volver al forecast</button>}
               </div>
             )}
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Viene del forecast de Comercial ({CFG.unidad}); puedes ajustar cualquier mes. El peso (g) reparte la materia prima según el tamaño.</div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Viene del forecast de Comercial ({CFG.unidad}); puedes ajustar cualquier mes. El peso (g) reparte la materia prima que no tiene producto asignado.</div>
           <div style={{ overflowX: 'auto' }}>
             <table data-hoja="Plan de producción" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr>
@@ -272,7 +297,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio, modulo = 'Costeo
         {/* Costos por bloque */}
         <div style={card}>
           <h3 style={h3}>💰 Costos del área por proceso (S/)</h3>
-          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Lo registrado en los módulos de {area} para {anio}, según el proceso de cada gasto (sin proceso: materia prima → 1er, envases/suministros → 2do, lo demás → compartido). Incluye embalaje de Logística y Calidad repartida.</div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Lo registrado en los módulos de {area} para {anio}, según el proceso de cada gasto (sin proceso: materia prima → 1er, envases/suministros → 2do, lo demás → compartido). Incluye embalaje de Logística y Calidad repartida. Lo marcado «por producto» (detalle del FP26: insumo por tamaño) se asigna directo a ese tamaño.</div>
           <div style={{ overflowX: 'auto' }}>
             <table data-hoja="Costos por proceso" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr><th style={{ ...th, textAlign: 'left', left: 0, zIndex: 2 }}>Concepto</th>{MESES_COSTEO.map(m => <th key={m} style={th}>{m}</th>)}<th style={th}>Total</th></tr></thead>
@@ -339,6 +364,61 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio, modulo = 'Costeo
             </table>
           </div>
         </div>
+
+        {/* Comparación con el costeo del Excel */}
+        {referencia.length > 0 && (
+          <div style={card}>
+            <h3 style={h3}>🔍 Comparación con el costeo del Excel {anio} (S/ por {CFG.producto} {CFG.bueno})</h3>
+            <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>
+              Excel: costo unitario de la hoja CosCris del FP26 importado. Sistema: el cálculo de arriba con el plan y los costos de esta versión. Para comparar igual con igual usa <b>📄 Usar plan del Excel</b> en el plan de producción.
+              Diferencia = (Sistema − Excel) ÷ Excel.
+              {CFG.clave === 'CRI' && <> Diferencias de método que ya se conocen: en CosCris la MOD y el CIF <b>compartidos</b> se suman en el 1er proceso y otra vez en el 2do, y la goma se carga completa al crisol de 30 g y al de 40 g; el sistema asigna cada sol una sola vez. Por eso el sistema suele salir más bajo.</>}
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table data-hoja="Comparación Excel" style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead><tr><th style={{ ...th, textAlign: 'left', left: 0, zIndex: 2 }}>Tamaño</th>{MESES_COSTEO.map(m => <th key={m} style={th}>{m}</th>)}<th style={th}>Promedio</th></tr></thead>
+                <tbody>
+                  {referencia.map(r => {
+                    const cp = claveProducto(r.producto, r.tamano);
+                    const sis = resultado.productos.filter(p => claveProducto(p.producto) === cp);
+                    const sisMes = MESES_COSTEO.map((_, i) => { const q = sis.reduce((a, p) => a + p.meses[i].pt, 0); return q > 0 ? sis.reduce((a, p) => a + p.meses[i].total, 0) / q : 0; });
+                    const qSis = sis.reduce((a, p) => a + p.ptAnual, 0);
+                    const sisProm = qSis > 0 ? sis.reduce((a, p) => a + p.totalAnual, 0) / qSis : 0;
+                    const exMes = MESES_COSTEO.map((_, i) => num(r.total?.[i]));
+                    const qEx = MESES_COSTEO.reduce((a, _, i) => a + (exMes[i] > 0 ? num(r.pt?.[i]) : 0), 0);
+                    const exProm = qEx > 0 ? MESES_COSTEO.reduce((a, _, i) => a + (exMes[i] > 0 ? exMes[i] * num(r.pt?.[i]) : 0), 0) / qEx : 0;
+                    const dif = (a, b) => (a > 0 && b > 0 ? (a - b) / b : null);
+                    const celdaDif = (d, key) => (
+                      <td key={key} style={{ ...td, fontWeight: 700, color: d === null ? '#94a3b8' : Math.abs(d) <= 0.03 ? '#15803d' : Math.abs(d) <= 0.1 ? '#b45309' : '#dc2626' }} data-valor={d ?? ''} data-formato="pct">
+                        {d === null ? '—' : `${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%`}
+                      </td>
+                    );
+                    return (
+                      <React.Fragment key={cp}>
+                        <tr style={{ background: '#f1f5f9' }}><td style={{ ...tdL, background: '#f1f5f9', fontWeight: 800 }} colSpan={14}>{r.producto}{sis.length === 0 ? ' — no está en el plan del sistema' : ''}</td></tr>
+                        <tr>
+                          <td style={{ ...tdL, paddingLeft: '22px' }} data-nivel="1">Sistema</td>
+                          {sisMes.map((v, i) => <td key={i} style={td} data-valor={v} data-formato="numero">{fmt(v, 4)}</td>)}
+                          <td style={{ ...td, fontWeight: 800 }} data-valor={sisProm} data-formato="numero">{fmt(sisProm, 4)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ ...tdL, paddingLeft: '22px', color: '#7c3aed' }} data-nivel="1">Excel FP26</td>
+                          {exMes.map((v, i) => <td key={i} style={{ ...td, color: '#7c3aed' }} data-valor={v} data-formato="numero">{fmt(v, 4)}</td>)}
+                          <td style={{ ...td, fontWeight: 800, color: '#7c3aed' }} data-valor={exProm} data-formato="numero">{fmt(exProm, 4)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ ...tdL, paddingLeft: '22px', color: '#64748b' }} data-nivel="1">Diferencia</td>
+                          {sisMes.map((v, i) => celdaDif(dif(v, exMes[i]), i))}
+                          {celdaDif(dif(sisProm, exProm), 'p')}
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Gráfico */}
         {prodGraf && (

@@ -362,23 +362,41 @@ function crearRouterPresupuesto(pool) {
   }));
 
   // Crea una versión; si viene `registros` (clonado), se insertan en la misma transacción.
+  // clonar_desde: la copia de los registros se hace aquí, en el servidor (una versión importada tiene
+  // miles de registros y no cabe en un solo envío). Los ids se conservan cambiando la versión que llevan
+  // dentro (IMP-v2-... -> IMP-v5-..., DERIV-CAL-IMP-v2-... -> DERIV-CAL-IMP-v5-...) o agregándola al final.
   router.post('/versiones', soloAdmin, manejar(async (req, res) => {
-    const { version, registros = [] } = req.body || {};
+    const { version, registros = [], clonar_desde: clonarDesde = null } = req.body || {};
     if (!version?.id_version || !version?.nombre) throw new ErrorApi(400, 'La versión necesita id_version y nombre');
     const ctx = ctxDe(req);
     const resultado = await conTransaccion(pool, async (cx) => {
       const existe = await cx.query('SELECT 1 FROM ppto_versiones WHERE id_version = $1', [version.id_version]);
       if (existe.rowCount > 0) throw new ErrorApi(409, `Ya existe la versión ${version.id_version}`);
+      const origen = clonarDesde
+        ? await cx.query('SELECT * FROM ppto_registros WHERE id_version = $1 AND NOT eliminado ORDER BY creado_en, id_registro', [clonarDesde])
+        : null;
+      if (clonarDesde) await verificarVersionExiste(cx, clonarDesde);
       const ins = await cx.query(
         `INSERT INTO ppto_versiones (id_version, nombre, estado, fecha_creacion, clonada_de, creado_por, actualizado_por)
          VALUES ($1,$2,$3,COALESCE($4::date, CURRENT_DATE),$5,$6,$6) RETURNING *`,
-        [version.id_version, version.nombre.trim(), version.estado || 'Borrador', version.fecha_creacion || null, version.clonada_de || null, ctx.usuario]
+        [version.id_version, version.nombre.trim(), version.estado || 'Borrador', version.fecha_creacion || null, clonarDesde || version.clonada_de || null, ctx.usuario]
       );
-      await auditar(cx, { ...ctx, accion: 'CREAR', tabla: 'ppto_versiones', id_objeto: version.id_version, id_version: version.id_version, despues: version,
-        detalle: version.clonada_de ? `Clonada de ${version.clonada_de} (${registros.length} registros)` : null });
+      const nuevo = version.id_version;
       const filas = [];
-      for (const r of registros) filas.push(await upsertRegistro(cx, { ...r, id_version: version.id_version }, ctx, { verificarRev: false, conAuditoria: false }));
-      return { version: filaAVersion(ins.rows[0]), registros: filas.map(filaARegistro) };
+      if (origen) {
+        const token = new RegExp(`(^|-)${String(clonarDesde).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-|$)`, 'i');
+        const cambiar = (id, agregar) => (token.test(id) ? id.replace(token, `$1${nuevo}$2`) : agregar ? `${id}-${nuevo}` : id);
+        for (const f of origen.rows) {
+          const r = filaARegistro(f);
+          await upsertRegistro(cx, { ...r, id_registro: cambiar(r.id_registro, true), id_lote: r.id_lote ? cambiar(r.id_lote, false) : r.id_lote, id_version: nuevo, rev: undefined },
+            ctx, { verificarRev: false, conAuditoria: false, permitirDerivado: true });
+        }
+      }
+      for (const r of registros) filas.push(await upsertRegistro(cx, { ...r, id_version: nuevo }, ctx, { verificarRev: false, conAuditoria: false }));
+      const copiados = origen ? origen.rowCount : registros.length;
+      await auditar(cx, { ...ctx, accion: 'CREAR', tabla: 'ppto_versiones', id_objeto: nuevo, id_version: nuevo, despues: version,
+        detalle: clonarDesde || version.clonada_de ? `Clonada de ${clonarDesde || version.clonada_de} (${copiados} registros)` : null });
+      return { version: filaAVersion(ins.rows[0]), registros: filas.map(filaARegistro), copiados };
     });
     res.status(201).json(resultado);
   }));
