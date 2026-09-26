@@ -178,7 +178,7 @@ export default function Offcanvas(props) {
           />
         );
 
-      // Logística costea el embalaje (prefijo 98); los costeos de producción solo lo leen.
+      // Logística costea el embalaje; sus registros van a la 6142000 de cada centro de producción (91/92/93).
       case 'Costeo de Embalajes':
         return (
           <CosteoEmbalajesForm

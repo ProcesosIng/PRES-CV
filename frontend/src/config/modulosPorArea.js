@@ -51,13 +51,14 @@ const MODULOS_COSTEO_CRISOLES = ['Costeo de Crisoles'];
 const MODULOS_COSTEO_FUNDENTE = ['Costeo de Fundente'];
 const MODULOS_COSTEO_COPELAS = ['Costeo de Copelas'];
 
-// El embalaje lo costea Logística (prefijo 98); Crisoles/Fundente/Copelas solo lo leen.
+// El embalaje lo costea Logística; su costo va a la 6142000 de cada centro de producción (91/92/93).
 const MODULOS_COSTEO_EMBALAJES = ['Costeo de Embalajes'];
 
 export const MODULOS_POR_AREA = {
   'Administración': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
-  // 'Envases y Embalajes' recibe los registros que genera el Costeo de Embalajes (cuenta 986142000).
-  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP, ...MODULOS_COSTEO_EMBALAJES, 'Envases y Embalajes'],
+  // Logística costea el embalaje, pero sus registros van al módulo 'Envases y Embalajes' de cada
+  // centro de producción (91/92/93 + 6142000), no a Logística.
+  'Logística': [...BASE_COMUN, ...MODULOS_PLAN_COMP, ...MODULOS_COSTEO_EMBALAJES],
   'Producción Crisoles': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_CRISOLES, ...MODULOS_PLANIFICACION, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Almacen': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Producción Fundente': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_FUNDENTE, ...BASE_COMUN, ...MODULOS_PLAN_COMP],

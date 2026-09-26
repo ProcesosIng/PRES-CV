@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 require('dotenv').config();
 const { crearRouterPresupuesto, inicializarEsquemaPresupuesto } = require('./presupuesto');
+const { asegurarClasificacionCuentas } = require('./clasificacionCuentas');
 
 const app = express();
 // CORS_ORIGIN (separado por comas) limita qué dominios pueden llamar a la API; sin definir, se permite todo (desarrollo).
@@ -511,6 +512,10 @@ async function sincronizarMaestros() {
     }
     
 
+    // Las cuentas nuevas que llegan de Odoo reciben la clasificación del Excel si existe (sin pisar las manuales)
+    const clasif = await asegurarClasificacionCuentas(dbLocal);
+    if (clasif.actualizadas) console.log(`✅ Clasificación de reportes asignada a ${clasif.actualizadas} cuentas nuevas`);
+
     console.log('✅ ¡Sincronización masiva completada con éxito en la base de datos local!');
     return true;
   } catch (error) {
@@ -740,6 +745,35 @@ app.get('/api/maestros/productos/historial', async (req, res) => {
   res.json({ ventas, compras, salidas, costoPromedio });
 });
 // ----------------------------------------------------
+// EJECUTADO PARA EL ESTADO DE RESULTADOS (Odoo, asientos publicados)
+// Saldo (debe - haber) por cuenta y mes de las clases 6, 7, 8 y 9 del año pedido.
+// La clasificación en líneas del EERR se hace en el frontend (config/eerr.js).
+// ----------------------------------------------------
+app.get('/api/eerr/ejecutado', async (req, res) => {
+  const anio = parseInt(req.query.anio, 10);
+  if (!anio || anio < 2000 || anio > 2100) return res.status(400).json({ error: 'Indique un año válido' });
+  try {
+    const resultado = await dbCorp.query(
+      `SELECT aa.code AS codigo,
+              EXTRACT(MONTH FROM aml.date)::int AS mes,
+              SUM(aml.debit - aml.credit) AS saldo
+         FROM public.account_move_line aml
+         JOIN public.account_move am ON am.id = aml.move_id
+         JOIN public.account_account aa ON aa.id = aml.account_id
+        WHERE am.state = 'posted'
+          AND aml.date >= $1::date AND aml.date < $2::date
+          AND (aa.code LIKE '6%' OR aa.code LIKE '7%' OR aa.code LIKE '8%' OR aa.code LIKE '9%')
+        GROUP BY aa.code, EXTRACT(MONTH FROM aml.date)`,
+      [`${anio}-01-01`, `${anio + 1}-01-01`]
+    );
+    res.json(resultado.rows.map(f => ({ codigo: String(f.codigo), mes: f.mes, saldo: parseFloat(f.saldo) || 0 })));
+  } catch (error) {
+    console.error('Error obteniendo el ejecutado del EERR:', error.message);
+    res.status(500).json({ error: 'No se pudo leer el ejecutado desde Odoo', detalle: error.message });
+  }
+});
+
+// ----------------------------------------------------
 // RUTAS DE FORECASTS / REGISTROS (BD Propia)
 // ----------------------------------------------------
 
@@ -798,6 +832,13 @@ app.listen(PORT, async () => {
     console.log('✅ Tablas de presupuesto listas (ppto_versiones, ppto_registros, ppto_auditoria)');
   } catch (err) {
     console.error('❌ No se pudieron crear las tablas de presupuesto:', err.message);
+  }
+
+  try {
+    const r = await asegurarClasificacionCuentas(dbLocal);
+    console.log(r.omitido ? `ℹ️ Clasificación de cuentas: ${r.omitido}` : `✅ Clasificación de cuentas para reportes: ${r.actualizadas} cuentas completadas desde el Excel`);
+  } catch (err) {
+    console.error('❌ No se pudo preparar la clasificación de cuentas:', err.message);
   }
   
   console.log('✨ Servidor listo. La sincronización se hará de forma manual desde el sistema.');
@@ -883,16 +924,25 @@ app.put('/api/maestros/empleados/:id', async (req, res) => {
 app.put('/api/maestros/cuentas/:id', async (req, res) => {
   const { id } = req.params;
   const { nombre, categoria, subcategoria, grupo } = req.body;
+  // Clasificación para reportes: si el campo viene en la petición se guarda tal cual (vacío = sin clasificar)
+  const enviado = (k) => Object.prototype.hasOwnProperty.call(req.body, k);
+  const limpio = (v) => (String(v ?? '').trim() || null);
   try {
     const r = await dbLocal.query(
       `UPDATE maestros_cuentas_local
        SET nombre = COALESCE($1, nombre),
            categoria = COALESCE($2, categoria),
            grupo = COALESCE($3, grupo),
+           id_reporte = CASE WHEN $5 THEN $6 ELSE id_reporte END,
+           grupo_reporte = CASE WHEN $7 THEN $8 ELSE grupo_reporte END,
+           subgrupo_reporte = CASE WHEN $9 THEN $10 ELSE subgrupo_reporte END,
            actualizado_at = CURRENT_TIMESTAMP
        WHERE codigo = $4 OR id_odoo::text = $4
        RETURNING *;`,
-      [nombre ?? null, categoria ?? null, subcategoria ?? grupo ?? null, id]
+      [nombre ?? null, categoria ?? null, subcategoria ?? grupo ?? null, id,
+       enviado('id_reporte'), limpio(req.body.id_reporte),
+       enviado('grupo_reporte'), limpio(req.body.grupo_reporte),
+       enviado('subgrupo_reporte'), limpio(req.body.subgrupo_reporte)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Cuenta no encontrada' });
     res.json({ mensaje: 'Cuenta actualizada correctamente', cuenta: r.rows[0] });

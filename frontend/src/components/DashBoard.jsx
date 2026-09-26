@@ -318,7 +318,8 @@ export default function Dashboard({
   const cuentasFiltradas = listaCuentas.filter(cta => {
     const textoMatch = 
       (cta.codigo && cta.codigo.toLowerCase().includes(busquedaCuenta.toLowerCase())) ||
-      (cta.nombre && cta.nombre.toLowerCase().includes(busquedaCuenta.toLowerCase()));
+      (cta.nombre && cta.nombre.toLowerCase().includes(busquedaCuenta.toLowerCase())) ||
+      [cta.grupo_reporte, cta.subgrupo_reporte, cta.id_reporte].some(v => v && String(v).toLowerCase().includes(busquedaCuenta.toLowerCase()));
     
     const categoriaMatch = categoriaCuentaSel === 'TODAS' || cta.categoria === categoriaCuentaSel;
     const subcategoriaMatch = subcategoriaCuentaSel === 'TODAS' || cta.subcategoria === subcategoriaCuentaSel;
@@ -930,7 +931,7 @@ export default function Dashboard({
                       <th style={{ padding: '12px' }}>Nombre de Cuenta</th>
                       <th style={{ padding: '12px' }}>Categoría</th>
                       <th style={{ padding: '12px' }}>Subcategoría</th>
-                      
+                      <th style={{ padding: '12px' }}>Clasificación reporte (Grupo / Subgrupo / ID)</th>
                     </>
                   ) : vistaActual === 'maestros_clientes' ? (
                     <>
@@ -1015,13 +1016,13 @@ export default function Dashboard({
                 ) : vistaActual === 'maestros_cuentas' ? (
                   cargandoOdoo ? (
                     <tr>
-                      <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
                         ⏳ Cargando plan contable desde Odoo...
                       </td>
                     </tr>
                   ) : cuentasPaginadas.length === 0 ? (
                     <tr>
-                      <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
                         No se encontraron cuentas contables.
                       </td>
                     </tr>
@@ -1032,6 +1033,15 @@ export default function Dashboard({
                         <td style={{ padding: '12px' }}>{cta.nombre}</td>
                         <td style={{ padding: '12px' }}>{cta.categoria}</td>
                         <td style={{ padding: '12px' }}>{cta.subcategoria || cta.grupo}</td>
+                        <td style={{ padding: '8px 12px', fontSize: '11px', lineHeight: 1.4 }}>
+                          {cta.grupo_reporte ? (
+                            <>
+                              <div style={{ fontWeight: 700, color: '#1e3a8a' }}>{cta.grupo_reporte}</div>
+                              <div style={{ color: '#475569' }}>{cta.subgrupo_reporte}</div>
+                              <div style={{ color: '#64748b' }}>{cta.id_reporte}</div>
+                            </>
+                          ) : <span style={{ color: '#b45309', fontStyle: 'italic' }}>Sin clasificar</span>}
+                        </td>
                         <td style={{ padding: '12px', textAlign: 'center', display: 'flex', gap: '8px', justifyContent: 'center' }}>
                           <button onClick={() => { setItemMaestroSeleccionado(cta); setModoAccionMaestro('ver'); setIsModalMaestroAbierto(true); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }} title="Ver">👁️</button>
                           <button onClick={() => { setItemMaestroSeleccionado(cta); setModoAccionMaestro('editar'); setIsModalMaestroAbierto(true); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }} title="Editar">✏️</button>
@@ -1537,6 +1547,35 @@ export default function Dashboard({
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Subcategoría:</label>
                 <input name="subcategoria" defaultValue={itemMaestroSeleccionado?.subcategoria || itemMaestroSeleccionado?.grupo || ''} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+              </div>
+
+              {/* Clasificación para el Reporte de Gastos (manual; la sincronización con Odoo no la cambia) */}
+              <div style={{ gridColumn: '1 / -1', borderTop: '1px dashed #cbd5e1', paddingTop: '10px', fontSize: '11px', fontWeight: 700, color: '#1e3a8a' }}>
+                CLASIFICACIÓN PARA REPORTES (ID → Subgrupo → Grupo)
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>ID (concepto):</label>
+                <input name="id_reporte" list="lista-id-reporte" defaultValue={itemMaestroSeleccionado?.id_reporte || ''} disabled={modoAccionMaestro === 'ver'}
+                  onChange={e => {
+                    // Si el ID ya existe en otra cuenta, completa su subgrupo y grupo para mantener la consistencia
+                    const ref = listaCuentas.find(c => c.id_reporte && c.id_reporte === e.target.value);
+                    if (ref && e.target.form) {
+                      e.target.form.elements.subgrupo_reporte.value = ref.subgrupo_reporte || '';
+                      e.target.form.elements.grupo_reporte.value = ref.grupo_reporte || '';
+                    }
+                  }}
+                  placeholder="Ej. 04.1. Remuneraciones - Sueldos y salarios" style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                <datalist id="lista-id-reporte">{[...new Set(listaCuentas.map(c => c.id_reporte).filter(Boolean))].sort().map(v => <option key={v} value={v} />)}</datalist>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Subgrupo:</label>
+                <input name="subgrupo_reporte" list="lista-subgrupo-reporte" defaultValue={itemMaestroSeleccionado?.subgrupo_reporte || ''} disabled={modoAccionMaestro === 'ver'} placeholder="Ej. 04. REMUNERACIONES" style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                <datalist id="lista-subgrupo-reporte">{[...new Set(listaCuentas.map(c => c.subgrupo_reporte).filter(Boolean))].sort().map(v => <option key={v} value={v} />)}</datalist>
+              </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Grupo:</label>
+                <input name="grupo_reporte" list="lista-grupo-reporte" defaultValue={itemMaestroSeleccionado?.grupo_reporte || ''} disabled={modoAccionMaestro === 'ver'} placeholder="Ej. B. REMUNERACIONES" style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                <datalist id="lista-grupo-reporte">{[...new Set(listaCuentas.map(c => c.grupo_reporte).filter(Boolean))].sort().map(v => <option key={v} value={v} />)}</datalist>
               </div>
             </>
           )}
