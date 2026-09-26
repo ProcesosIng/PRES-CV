@@ -151,10 +151,10 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
         dist: emp.distribucion?.toString().replace('%', '') || '100',
         cargo: cargoDetectado, 
         sueldo_calc: '0',
-        proceso: emp.proceso || ''
+        proceso: emp.proceso === 'No aplica' ? '' : (emp.proceso || '')
       });
       setValoresRegistro(prev => ({ ...prev, asig_fam: emp.asigFam || '0' }));
-      setProceso(emp.proceso || '');
+      setProceso(emp.proceso === 'No aplica' ? '' : (emp.proceso || ''));
       setSeguro(emp.seguro || '');
     } else {
       setDatosAuto({ dni: '', sueldo: '0', dist: '100', sueldo_calc: '0', cargo: '' });
@@ -180,10 +180,10 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
       dist: emp.distribucion?.toString().replace('%', '') || '100',
       cargo: cargoDetectado, 
       sueldo_calc: '0',
-      proceso: emp.proceso || ''
+      proceso: emp.proceso === 'No aplica' ? '' : (emp.proceso || '')
     });
     setValoresRegistro(prev => ({ ...prev, asig_fam: emp.asigFam || '0' }));
-    setProceso(emp.proceso || '');
+    setProceso(emp.proceso === 'No aplica' ? '' : (emp.proceso || ''));
     setSeguro(emp.seguro || '');
   };
 

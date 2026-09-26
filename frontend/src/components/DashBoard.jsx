@@ -39,6 +39,14 @@ const FILAS_ESPECIFICAS = {
   'Costeo de Embalajes': CosteoEmbalajesFila,
 };
 
+// Iniciales a partir del nombre (las mismas que muestra la tabla de usuarios).
+const getIniciales = (nombre) => {
+  if (!nombre) return '--';
+  const palabras = nombre.trim().split(/\s+/);
+  if (palabras.length === 1) return palabras[0].substring(0, 2).toUpperCase();
+  return (palabras[0][0] + palabras[1][0]).toUpperCase();
+};
+
 export default function Dashboard({
   usuario,
   vistaActual,
@@ -1123,14 +1131,6 @@ export default function Dashboard({
                 ) : vistaActual === 'maestros_usuarios' ? (
                     usuariosPaginados.map((usr, idx) => {
                       
-                      // Función para generar las iniciales a partir del nombre en tiempo real
-                      const getIniciales = (nombre) => {
-                        if (!nombre) return "--";
-                        const palabras = nombre.trim().split(/\s+/);
-                        if (palabras.length === 1) return palabras[0].substring(0, 2).toUpperCase();
-                        return (palabras[0][0] + palabras[1][0]).toUpperCase();
-                      };
-
                       return (
                         <tr key={usr.id_odoo || idx} style={{ borderBottom: '1px solid #f1f5f9', fontSize: '13px', background: 'white' }}>
                           
@@ -1558,6 +1558,7 @@ export default function Dashboard({
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Proceso:</label>
                 <select name="proceso" defaultValue={itemMaestroSeleccionado?.proceso || ''} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}>
                   <option value="">Sin asignar</option>
+                  <option value="No aplica">No aplica</option>
                   {PROCESOS_PRODUCTIVOS.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
@@ -1699,11 +1700,13 @@ export default function Dashboard({
               </div>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Iniciales:</label>
-                <input name="iniciales" defaultValue={itemMaestroSeleccionado?.iniciales || ''} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} required />
+                <input name="iniciales" defaultValue={itemMaestroSeleccionado?.iniciales || (itemMaestroSeleccionado ? getIniciales(itemMaestroSeleccionado.nombre).replace('--', '') : '')} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} required />
               </div>
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>Rol / Permiso:</label>
-                <input name="rol" defaultValue={itemMaestroSeleccionado?.rol || ''} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} required />
+                {/* Mismo valor que muestra la tabla ("Usuario" si no tiene rol); se puede escribir otro. */}
+                <input name="rol" list="lista-roles-usuario" defaultValue={itemMaestroSeleccionado?.rol || 'Usuario'} disabled={modoAccionMaestro === 'ver'} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }} required />
+                <datalist id="lista-roles-usuario">{[...new Set(['Usuario', 'Administrador', ...arrayUsuarios.map(u => u.rol).filter(Boolean)])].map(r => <option key={r} value={r} />)}</datalist>
               </div>
             </>
           )}
