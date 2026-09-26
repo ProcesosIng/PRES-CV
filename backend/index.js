@@ -862,6 +862,13 @@ app.listen(PORT, async () => {
     console.error('❌ No se pudieron crear las tablas de presupuesto:', err.message);
   }
 
+  // Iniciales editables en el maestro de usuarios (la sincronización con Odoo no las toca).
+  try {
+    await dbLocal.query('ALTER TABLE IF EXISTS maestros_usuarios_local ADD COLUMN IF NOT EXISTS iniciales VARCHAR(10)');
+  } catch (err) {
+    console.error('❌ No se pudo preparar la columna de iniciales de usuarios:', err.message);
+  }
+
   try {
     const r = await asegurarClasificacionCuentas(dbLocal);
     console.log(r.omitido ? `ℹ️ Clasificación de cuentas: ${r.omitido}` : `✅ Clasificación de cuentas para reportes: ${r.actualizadas} cuentas completadas desde el Excel`);
@@ -1033,13 +1040,13 @@ app.put('/api/maestros/productos/:id', soloAdmin, async (req, res) => {
 // 5. Actualizar Usuario
 app.put('/api/maestros/usuarios/:id', soloAdmin, async (req, res) => {
   const { id } = req.params;
-  const { login, nombre, rol } = req.body;
+  const { login, nombre, rol, iniciales } = req.body;
   try {
     await dbLocal.query(
       `UPDATE maestros_usuarios_local 
-       SET login = $1, nombre = $2, rol = $3, actualizado_at = CURRENT_TIMESTAMP 
+       SET login = $1, nombre = $2, rol = $3, iniciales = NULLIF($5, ''), actualizado_at = CURRENT_TIMESTAMP 
        WHERE login = $4 OR id_odoo::text = $4`,
-      [login, nombre, rol, id]
+      [login, nombre, rol, id, String(iniciales || '').trim().toUpperCase().slice(0, 10)]
     );
     res.json({ mensaje: 'Usuario actualizado correctamente' });
   } catch (error) {
