@@ -17,6 +17,7 @@ import Offcanvas from './Offcanvas';
 import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
 import AdminUsuarios from './admin/AdminUsuarios';
 import DistribucionCalidad, { MODULO_DISTRIBUCION_CALIDAD } from './modulos/DistribucionCalidad';
+import CosteoCrisolesTablero from './modulos/CosteoCrisolesTablero';
 import AdminActividad from './admin/AdminActividad';
 
 const FILAS_ESPECIFICAS = {
@@ -484,7 +485,17 @@ export default function Dashboard({
         </section>
       )}
 
-      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && (
+      {/* Costeo de Crisoles: pantalla completa tipo tablero (ya no ventana emergente) */}
+      {vistaActual === 'tabla' && categoriaSeleccionada === 'Costeo de Crisoles' && (
+        <section style={{ width: '100%', padding: '20px', boxSizing: 'border-box' }}>
+          <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
+          <div style={{ marginTop: '16px' }}>
+            <CosteoCrisolesTablero idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />
+          </div>
+        </section>
+      )}
+
+      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && categoriaSeleccionada !== 'Costeo de Crisoles' && (
         <section style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
 
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
