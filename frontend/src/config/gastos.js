@@ -4,7 +4,9 @@
 // Solo cuentas de destino de un ÁREA: 2 dígitos de área (91-95, 98, 99) + cuenta de gasto
 // de la clase 6 (p. ej. 946251000 = Administración + 6251000).
 // No entran: las 97 (gastos financieros y diferencia de cambio, van solo al EERR) ni las
-// cuentas de agrupación como 910000000 / 940000000.
+// cuentas de agrupación como 910000000 / 940000000, ni la materia prima en proceso (6122000,
+// p. ej. 916122000): es un traslado entre inventarios, no un gasto nuevo.
+// Ejecutado: solo asientos PUBLICADOS en Odoo (ni borrador ni cancelados).
 // El ID, GRUPO y SUBGRUPO salen del maestro de cuentas (asignación manual) o, si falta, del Excel por cuenta base.
 //
 // Signos: los gastos se muestran en NEGATIVO; Variación = Ejecutado - Proyectado
@@ -26,6 +28,9 @@ export const AREAS_POR_PREFIJO = {
 // Clasificación por cuenta BASE (sin prefijo de área) tomada del Excel "CUENTAS ODOO - PRESUPUESTOS".
 // Solo es el respaldo: manda la que esté asignada en el MAESTRO DE CUENTAS (id/grupo/subgrupo_reporte).
 
+// Cuentas base que no se consideran gasto del área (ver encabezado).
+const CUENTAS_EXCLUIDAS = ['6122'];
+
 const SIN_CLASIFICAR = { id: 'Sin ID', grupo: 'Z. SIN CLASIFICAR', subgrupo: '99. SIN CLASIFICAR (asignar en el maestro de cuentas)' };
 
 // clasificacionMaestro: { '946251000': { id, grupo, subgrupo } } armado desde el maestro de cuentas.
@@ -36,6 +41,7 @@ export function clasificarGasto(codigo, clasificacionMaestro = {}) {
   const prefijo = c.slice(0, 2);
   const base = c.slice(2);
   if (!AREAS_POR_PREFIJO[prefijo] || !base.startsWith('6')) return null;
+  if (CUENTAS_EXCLUIDAS.some(ex => base.startsWith(ex))) return null;
   const delMaestro = clasificacionMaestro[c];
   const delExcel = CLASIFICACION_BASE[base];
   const cls = (delMaestro && delMaestro.grupo)
