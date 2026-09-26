@@ -203,11 +203,11 @@ function BarraEjecucion({ ejec, ancho = 120 }) {
   );
 }
 
-function Tarjeta({ titulo, valor, sub, color, children }) {
+function Tarjeta({ titulo, valor, sub, color, children, largo = false }) {
   return (
     <div style={{ background: 'white', border: '1px solid #e2e8f0', borderTop: `4px solid ${color}`, borderRadius: '10px', padding: '12px 14px', minWidth: 0 }}>
       <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{titulo}</div>
-      <div style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{valor}</div>
+      <div style={{ fontSize: largo ? '16px' : '22px', fontWeight: 800, color: '#0f172a', marginTop: '2px', lineHeight: 1.25, ...(largo ? {} : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }) }}>{valor}</div>
       {sub && <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px' }}>{sub}</div>}
       {children}
     </div>
@@ -215,44 +215,47 @@ function Tarjeta({ titulo, valor, sub, color, children }) {
 }
 
 // Tendencia mensual: barras agrupadas proyectado vs ejecutado (un solo eje, en soles).
+// Solo los meses del filtro: un mes quitado (p. ej. el abierto con asientos por corregir) no se
+// dibuja ni cuenta para la escala.
 function Tendencia({ arbol, mesesSel, mesAbierto }) {
   const [hover, setHover] = useState(null);
-  const datos = MESES.map((_, i) => gastoDe(arbol, [i]));
+  const meses = [...mesesSel].sort((a, b) => a - b);
+  const datos = meses.map(i => ({ ...gastoDe(arbol, [i]), mes: i }));
   const max = Math.max(1, ...datos.flatMap(d => [d.p, d.e]));
+  const cols = `repeat(${Math.max(meses.length, 1)}, 1fr)`;
   const alto = 170;
   return (
     <div>
       <div style={{ display: 'flex', gap: '16px', fontSize: '11.5px', color: '#334155', marginBottom: '8px', flexWrap: 'wrap' }}>
         <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: COLOR_PROY, borderRadius: '2px', marginRight: '5px' }} />Proyectado</span>
         <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: COLOR_EJEC, borderRadius: '2px', marginRight: '5px' }} />Ejecutado</span>
-        {mesAbierto !== null && <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 2px, #fde2d4 2px 4px)`, borderRadius: '2px', marginRight: '5px' }} />Mes en curso (abierto)</span>}
-        <span style={{ color: '#94a3b8' }}>Los meses fuera del filtro se ven atenuados.</span>
+        {mesAbierto !== null && meses.includes(mesAbierto) && <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 2px, #fde2d4 2px 4px)`, borderRadius: '2px', marginRight: '5px' }} />Mes en curso (abierto)</span>}
       </div>
       <div style={{ position: 'relative' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '6px', alignItems: 'end', height: `${alto}px`, borderBottom: '1px solid #cbd5e1', padding: '0 2px' }}>
-          {datos.map((d, i) => {
-            const activo = mesesSel.includes(i);
-            const abierto = i === mesAbierto;
+        {meses.length === 0 && <div style={{ color: '#94a3b8', fontSize: '12px', padding: '20px 0' }}>Elige al menos un mes en el filtro.</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '6px', alignItems: 'end', height: `${alto}px`, borderBottom: '1px solid #cbd5e1', padding: '0 2px' }}>
+          {datos.map((d, k) => {
+            const abierto = d.mes === mesAbierto;
             return (
-              <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
-                style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '2px', height: '100%', opacity: activo ? 1 : 0.3, cursor: 'default', background: hover === i ? '#f1f5f9' : 'transparent', borderRadius: '4px 4px 0 0' }}>
-                <div style={{ width: '38%', height: `${(d.p / max) * 100}%`, background: COLOR_PROY, borderRadius: '4px 4px 0 0' }} />
-                <div style={{ width: '38%', height: `${(d.e / max) * 100}%`, background: abierto ? `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 3px, #fde2d4 3px 6px)` : COLOR_EJEC, borderRadius: '4px 4px 0 0' }} />
+              <div key={d.mes} onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}
+                style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '2px', height: '100%', cursor: 'default', background: hover === k ? '#f1f5f9' : 'transparent', borderRadius: '4px 4px 0 0' }}>
+                <div style={{ width: '38%', maxWidth: '48px', height: `${(d.p / max) * 100}%`, background: COLOR_PROY, borderRadius: '4px 4px 0 0' }} />
+                <div style={{ width: '38%', maxWidth: '48px', height: `${(d.e / max) * 100}%`, background: abierto ? `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 3px, #fde2d4 3px 6px)` : COLOR_EJEC, borderRadius: '4px 4px 0 0' }} />
               </div>
             );
           })}
         </div>
-        {hover !== null && (
-          <div style={{ position: 'absolute', top: 0, left: `${Math.min(hover, 9) * (100 / 12)}%`, background: '#0f172a', color: 'white', borderRadius: '8px', padding: '8px 10px', fontSize: '11.5px', pointerEvents: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.2)', zIndex: 5, minWidth: '190px' }}>
-            <div style={{ fontWeight: 800, marginBottom: '4px', textTransform: 'capitalize' }}>{MESES[hover]}{hover === mesAbierto ? ' · en curso (abierto)' : ''}</div>
+        {hover !== null && datos[hover] && (
+          <div style={{ position: 'absolute', top: 0, left: `${Math.min(hover / Math.max(datos.length, 1), 0.75) * 100}%`, background: '#0f172a', color: 'white', borderRadius: '8px', padding: '8px 10px', fontSize: '11.5px', pointerEvents: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.2)', zIndex: 5, minWidth: '190px' }}>
+            <div style={{ fontWeight: 800, marginBottom: '4px', textTransform: 'capitalize' }}>{MESES[datos[hover].mes]}{datos[hover].mes === mesAbierto ? ' · en curso (abierto)' : ''}</div>
             <div>Proyectado: <b>{soles(datos[hover].p)}</b></div>
             <div>Ejecutado: <b>{soles(datos[hover].e)}</b></div>
             <div>Ejecución: <b>{pctTxt(datos[hover].ejec)}</b> · {datos[hover].ahorro >= 0 ? 'ahorro' : 'sobregasto'} {soles(datos[hover].ahorro)}</div>
           </div>
         )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '6px', fontSize: '10.5px', color: '#475569', textAlign: 'center', marginTop: '4px' }}>
-        {MESES.map((m, i) => <div key={m} style={{ fontWeight: i === mesAbierto ? 800 : 500 }}>{m.slice(0, 3)}{i === mesAbierto ? ' ●' : ''}</div>)}
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '6px', fontSize: '10.5px', color: '#475569', textAlign: 'center', marginTop: '4px' }}>
+        {meses.map(i => <div key={i} style={{ fontWeight: i === mesAbierto ? 800 : 500 }}>{MESES[i].slice(0, 3)}{i === mesAbierto ? ' ●' : ''}</div>)}
       </div>
     </div>
   );
@@ -435,7 +438,9 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
   const cerrados = mesAbierto === null ? MESES.map((_, i) => i) : MESES.map((_, i) => i).filter(i => i < mesAbierto);
   const hastaHoy = mesAbierto === null ? MESES.map((_, i) => i) : MESES.map((_, i) => i).filter(i => i <= mesAbierto);
   const igual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-  const periodo = mesesSel.length === 12 ? 'todo el año' : mesesSel.length === 0 ? 'sin meses' : mesesSel.length === 1 ? MESES[mesesSel[0]] : `${MESES[mesesSel[0]]} a ${MESES[mesesSel[mesesSel.length - 1]]} (${mesesSel.length} meses)`;
+  const seguidos = mesesSel.every((m, k) => k === 0 || m === mesesSel[k - 1] + 1);
+  const periodo = mesesSel.length === 12 ? 'todo el año' : mesesSel.length === 0 ? 'sin meses' : mesesSel.length === 1 ? MESES[mesesSel[0]]
+    : seguidos ? `${MESES[mesesSel[0]]} a ${MESES[mesesSel[mesesSel.length - 1]]} (${mesesSel.length} meses)` : `${mesesSel.map(i => MESES[i].slice(0, 3)).join(', ')} (${mesesSel.length} meses)`;
 
   const card = { background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 18px', marginBottom: '14px' };
   const h3 = { margin: '0 0 10px', fontSize: '15px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' };
@@ -496,8 +501,8 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
         <Tarjeta titulo="Ejecución del presupuesto" valor={pctTxt(total.ejec)} color="#0f172a">
           <div style={{ marginTop: '6px' }}><BarraEjecucion ejec={total.ejec} ancho={150} /></div>
         </Tarjeta>
-        {peorArea && peorArea.ahorro < 0 && <Tarjeta titulo="Mayor sobregasto" valor={peorArea.area} sub={<Variacion ahorro={peorArea.ahorro} p={peorArea.p} compacto />} color={MAL} />}
-        {mejorArea && mejorArea.ahorro > 0 && <Tarjeta titulo="Mayor ahorro" valor={mejorArea.area} sub={<Variacion ahorro={mejorArea.ahorro} p={mejorArea.p} compacto />} color={OK} />}
+        {peorArea && peorArea.ahorro < 0 && <Tarjeta largo titulo="Mayor sobregasto" valor={peorArea.area} sub={<Variacion ahorro={peorArea.ahorro} p={peorArea.p} compacto />} color={MAL} />}
+        {mejorArea && mejorArea.ahorro > 0 && <Tarjeta largo titulo="Mayor ahorro" valor={mejorArea.area} sub={<Variacion ahorro={mejorArea.ahorro} p={mejorArea.p} compacto />} color={OK} />}
       </div>
 
       {/* Por área */}

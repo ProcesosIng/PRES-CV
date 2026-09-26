@@ -186,3 +186,73 @@ export function lineasPeriodo(baseMensual, meses, tasas = { participacion: 10, i
   L.pctNeto = pct(L.utilNeta, L.ventas);
   return L;
 }
+
+// ---------------------------------------------------------------------------------------------
+// SUBDETALLE POR CUENTA de cada línea base: { clave: { codigo: { nombre, meses: [12] } } }
+// (mismos saldos y signos que calcularProyectado / calcularEjecutado).
+// En el proyectado, ventas y costo se abren por la cuenta 70x / 69x que trae el forecast
+// (línea de negocio y zona).
+// ---------------------------------------------------------------------------------------------
+const agregarDetalle = (det, clave, codigo, nombre, mes, monto) => {
+  if (!det[clave]) det[clave] = {};
+  const cod = codigo || 'Sin cuenta';
+  if (!det[clave][cod]) det[clave][cod] = { nombre: nombre || '', meses: Array(12).fill(0) };
+  if (!det[clave][cod].nombre && nombre) det[clave][cod].nombre = nombre;
+  det[clave][cod].meses[mes] += monto;
+};
+const separar = (texto) => {
+  const t = String(texto || '').trim();
+  const codigo = t.split(/\s/)[0].replace(/\D/g, '');
+  const nombre = t.includes(' - ') ? t.slice(t.indexOf(' - ') + 3) : '';
+  return { codigo, nombre };
+};
+
+export function detalleProyectado(registros, { idVersion, anio }) {
+  const det = {};
+  registros.filter(r => (!idVersion || r.id_version === idVersion)).forEach(r => {
+    const dc = r.detalle_columnas || {};
+    if (esForecast(r.modulo)) {
+      if (anioDe(r) !== anio) return;
+      const tc = dc.moneda === 'US$' ? (num(dc.tipo_cambio) || 1) : 1;
+      const cv = separar(dc.cuenta_venta);
+      const cc = separar(dc.cuenta_costo);
+      MESES_EERR.forEach((m, i) => {
+        const cant = num(dc.cantidades?.[m]);
+        if (!cant) return;
+        const prob = dc.tipo_probabilidad === 'general' || !dc.probabilidades_meses
+          ? num(dc.probabilidad_general ?? 100) : num(dc.probabilidades_meses?.[m] ?? 100);
+        const esperada = cant * prob / 100;
+        agregarDetalle(det, 'ventas', cv.codigo || dc.unidad_negocio, cv.nombre || dc.unidad_negocio, i, -esperada * num(dc.precio_venta) * tc);
+        agregarDetalle(det, 'costo', cc.codigo || dc.unidad_negocio, cc.nombre || dc.unidad_negocio, i, esperada * num(dc.costo_unitario) * tc);
+      });
+      return;
+    }
+    if (esCosteo(r.modulo)) return;
+    const f = mesDe(r.fecha_proyeccion);
+    if (!f || f.anio !== anio) return;
+    const lineas = Array.isArray(r.desglose_contable) && r.desglose_contable.length > 0
+      ? r.desglose_contable.map(d => ({ cuenta: d.cuenta, monto: num(d.monto) }))
+      : [{ cuenta: dc.cuenta_afectada || dc.numero_cuenta, monto: num(r.totales?.costo_total ?? dc.costo_total) }];
+    lineas.forEach(l => {
+      const { codigo, nombre } = separar(l.cuenta);
+      const clave = clasificarCuenta(codigo);
+      if (clave) agregarDetalle(det, clave, codigo, nombre, f.mes, l.monto);
+    });
+  });
+  return det;
+}
+
+export function detalleEjecutado(filasOdoo) {
+  const det = {};
+  (filasOdoo || []).forEach(f => {
+    const clave = clasificarCuenta(f.codigo);
+    const i = (parseInt(f.mes, 10) || 0) - 1;
+    if (!clave || i < 0 || i > 11) return;
+    agregarDetalle(det, clave, String(f.codigo), '', i, num(f.saldo));
+  });
+  return det;
+}
+
+// Signo con que se MUESTRA el saldo de una línea (ventas e ingresos son acreedores).
+export const SIGNO_LINEA = { ventas: -1, otrosIng: -1, ingFin: -1, difCamb: -1 };
+export const LINEAS_CON_CUENTAS = BASES;

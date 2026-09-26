@@ -1000,7 +1000,7 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
       )}
 
       {tipoReporte === 'eerr' && verEERR && (
-        <EstadoResultados registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
+        <EstadoResultados registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} expandirTodo={exportando} />
       )}
       </div>
 
