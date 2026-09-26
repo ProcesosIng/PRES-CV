@@ -14,13 +14,10 @@ const cuentaEmbalajeDe = (areaProduccion) => `${PREFIJO_POR_AREA[areaProduccion]
 const MODULO_DESTINO_EMBALAJE = 'Envases y Embalajes';
 const AREA_LOGISTICA = 'Logística';
 
-const obtenerFactorPorUnidad = (unidadMedida) => {
-  if (!unidadMedida) return 1;
-  const u = unidadMedida.toLowerCase().trim();
-  if (u === 'saco 25kg' || u === 'bolsa 25kg') return 25;
-  const m = u.match(/(\d+)/);
-  return m ? parseInt(m[1], 10) : 1;
-};
+// Las cantidades del forecast ya están en la unidad de venta (unidades o kg): no se multiplican
+// por el número que aparezca en la UM (p. ej. "Caja x 15Kg" o "Bx"), porque el precio es por unidad/kg.
+const fmt2 = (v) => (Number(v) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtQ = (v) => (Number(v) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 function _crearInsumoVacio() {
   return {
@@ -96,10 +93,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
     if (nuevaLinea) aplicarConfig(obtenerConfigEmbalajeGuardada({ idVersion, anio: nuevoAnio, unidadNegocio: nuevaLinea }));
   };
 
-  const volumenPorLinea = (linea) => {
-    const factor = obtenerFactorPorUnidad(linea.um);
-    return MESES.reduce((acc, m) => acc + (parseFloat(linea.cantidades?.[m]) || 0), 0) * factor;
-  };
+  const volumenPorLinea = (linea) => MESES.reduce((acc, m) => acc + (parseFloat(linea.cantidades?.[m]) || 0), 0);
 
   // Cálculo por línea de forecast: paletas, consumo de cada insumo y costo total/unitario
   const calculoPorLinea = useMemo(() => {
@@ -129,6 +123,43 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
   }, [lineasForecast, insumosEmbalaje, capacidadPaletaLocal, capacidadPaletaExterior]);
 
   const totalGeneral = calculoPorLinea.reduce((s, l) => s + l.costoTotal, 0);
+
+  // Detalle de materiales de embalaje. Crisoles y Copelas: por producto. Fundente: por mes.
+  const nombresInsumos = insumosEmbalaje.filter(i => i.insumo).map(i => i.insumo);
+  const [vistaDetalle, setVistaDetalle] = useState(null);
+  const vistaActiva = vistaDetalle || (lineaSel === 'Fundente' ? 'mes' : 'producto');
+  const detallePorProducto = useMemo(() => {
+    const mapa = {};
+    calculoPorLinea.forEach(l => {
+      if (!mapa[l.producto]) mapa[l.producto] = { producto: l.producto, volumen: 0, paletas: 0, insumos: {}, costo: 0 };
+      const f = mapa[l.producto];
+      f.volumen += l.volumen; f.paletas += l.paletas; f.costo += l.costoTotal;
+      l.detalleInsumos.forEach(d => {
+        if (!f.insumos[d.insumo]) f.insumos[d.insumo] = { cantidad: 0, costo: 0 };
+        f.insumos[d.insumo].cantidad += d.consumo; f.insumos[d.insumo].costo += d.costo;
+      });
+    });
+    return Object.values(mapa).sort((a, b) => b.volumen - a.volumen);
+  }, [calculoPorLinea]);
+  const detallePorMes = useMemo(() => {
+    // Cada línea reparte su consumo según el volumen de cada mes (igual que los registros que se guardan).
+    const filas = {};
+    nombresInsumos.forEach(n => { filas[n] = { cantidad: Array(12).fill(0), costo: Array(12).fill(0) }; });
+    const volumen = Array(12).fill(0);
+    calculoPorLinea.forEach(l => {
+      MESES.forEach((m, i) => {
+        const vol = parseFloat(l.cantidades?.[m]) || 0;
+        volumen[i] += vol;
+        if (!(vol > 0) || !(l.volumen > 0)) return;
+        l.detalleInsumos.forEach(d => {
+          if (!filas[d.insumo]) return;
+          filas[d.insumo].cantidad[i] += d.consumo * vol / l.volumen;
+          filas[d.insumo].costo[i] += d.costo * vol / l.volumen;
+        });
+      });
+    });
+    return { filas, volumen };
+  }, [calculoPorLinea, insumosEmbalaje]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const actInsumo = (id, campo, valor) =>
     setInsumosEmbalaje(insumosEmbalaje.map(i => i.id === id ? { ...i, [campo]: valor } : i));
@@ -171,9 +202,8 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
       // Registros derivados mes a mes en el módulo "Envases y Embalajes" del CENTRO DE PRODUCCIÓN
       // de la línea (p. ej. Producción Crisoles, cuenta 916142000).
       // El costo de cada insumo se reparte según el volumen de cada mes del forecast.
-      const factor = obtenerFactorPorUnidad(linea.um);
       MESES.forEach((mes, iM) => {
-        const volMes = (parseFloat(linea.cantidades?.[mes]) || 0) * factor;
+        const volMes = parseFloat(linea.cantidades?.[mes]) || 0;
         if (!(volMes > 0) || !(linea.volumen > 0)) return;
         const proporcion = volMes / linea.volumen;
         linea.detalleInsumos.forEach((d, iIns) => {
@@ -242,7 +272,8 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '82vh', width: '100%', maxWidth: '950px', margin: '0 auto', overflow: 'hidden' }}>
       <fieldset disabled={isSoloLectura} style={{ border: 'none', padding: 0, margin: 0, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', padding: '16px' }}>
+        {/* grid (no flex): las secciones no se encogen; la tabla 3 se muestra completa y la ventana hace scroll */}
+        <div style={{ flex: 1, display: 'grid', gridAutoRows: 'max-content', gap: '20px', overflowY: 'auto', padding: '16px' }}>
 
           {/* 1. AÑO Y CAPACIDAD POR PALETA */}
           <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -311,9 +342,9 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
             <div style={{ background: '#f8fafc', padding: '10px 14px', fontWeight: 700, color: '#1e293b', borderBottom: '1px solid #cbd5e1' }}>
               3. Costeo por Línea (Producto + Cliente + Zona){lineaSel ? ` — ${lineaSel}` : ''} — {calculoPorLinea.length} registros
             </div>
-            <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+            <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-                <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9' }}>
+                <thead style={{ background: '#f1f5f9' }}>
                   <tr>
                     <th style={{ padding: '6px', textAlign: 'left' }}>Producto</th>
                     <th style={{ padding: '6px', textAlign: 'left' }}>Línea</th>
@@ -339,7 +370,7 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
                       <td style={{ padding: '5px 6px', textAlign: 'right' }}>{l.volumen.toLocaleString('en-US', { maximumFractionDigits: 0 })}</td>
                       <td style={{ padding: '5px 6px', textAlign: 'right' }}>{l.paletas}</td>
                       <td style={{ padding: '5px 6px', textAlign: 'right' }}>S/ {l.costoUnitario.toFixed(4)}</td>
-                      <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700, color: '#166534' }}>S/ {l.costoTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700, color: '#166534' }}>S/ {fmt2(l.costoTotal)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -349,8 +380,102 @@ export default function CosteoEmbalajesForm({ registro, onGuardar, onCancelar, m
 
           <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '8px', border: '1px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', color: '#166534', fontSize: '16px' }}>
             <span>COSTO TOTAL DE EMBALAJE{lineaSel ? ` — ${lineaSel}` : ''} ({anioSel}):</span>
-            <span>S/ {totalGeneral.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            <span>S/ {fmt2(totalGeneral)}</span>
           </div>
+
+          {/* 4. DETALLE DE MATERIALES DE EMBALAJE */}
+          {calculoPorLinea.length > 0 && nombresInsumos.length > 0 && (
+            <div style={{ background: 'white', border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
+              <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontWeight: 700, color: '#1e293b' }}>4. Materiales de embalaje — cantidades y costo {vistaActiva === 'mes' ? 'por mes' : 'por producto'}</span>
+                <span data-no-print style={{ display: 'flex', gap: '4px' }}>
+                  {[['producto', 'Por producto'], ['mes', 'Por mes']].map(([v, t]) => (
+                    <button key={v} type="button" onClick={() => setVistaDetalle(v)} style={{ padding: '3px 10px', fontSize: '11px', borderRadius: '4px', border: '1px solid #cbd5e1', cursor: 'pointer', background: vistaActiva === v ? '#2563eb' : 'white', color: vistaActiva === v ? 'white' : '#334155' }}>{t}</button>
+                  ))}
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                {vistaActiva === 'producto' ? (
+                  <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                    <thead style={{ background: '#f1f5f9' }}>
+                      <tr>
+                        <th rowSpan={2} style={{ padding: '6px', textAlign: 'left' }}>Producto</th>
+                        <th rowSpan={2} style={{ padding: '6px', textAlign: 'right' }}>Vol.</th>
+                        <th rowSpan={2} style={{ padding: '6px', textAlign: 'right' }}>Paletas</th>
+                        {nombresInsumos.map(n => <th key={n} colSpan={2} style={{ padding: '6px', textAlign: 'center', borderLeft: '1px solid #cbd5e1' }}>{n}</th>)}
+                        <th rowSpan={2} style={{ padding: '6px', textAlign: 'right', borderLeft: '1px solid #cbd5e1' }}>Costo total</th>
+                      </tr>
+                      <tr>{nombresInsumos.map(n => <React.Fragment key={n}><th style={{ padding: '4px 6px', textAlign: 'right', fontSize: '10px', borderLeft: '1px solid #cbd5e1' }}>Cant.</th><th style={{ padding: '4px 6px', textAlign: 'right', fontSize: '10px' }}>S/</th></React.Fragment>)}</tr>
+                    </thead>
+                    <tbody>
+                      {detallePorProducto.map(f => (
+                        <tr key={f.producto} style={{ borderTop: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '5px 6px', fontWeight: 600 }}>{f.producto}</td>
+                          <td style={{ padding: '5px 6px', textAlign: 'right' }}>{fmtQ(f.volumen)}</td>
+                          <td style={{ padding: '5px 6px', textAlign: 'right' }}>{fmtQ(f.paletas)}</td>
+                          {nombresInsumos.map(n => (
+                            <React.Fragment key={n}>
+                              <td style={{ padding: '5px 6px', textAlign: 'right', borderLeft: '1px solid #f1f5f9' }}>{fmtQ(f.insumos[n]?.cantidad)}</td>
+                              <td style={{ padding: '5px 6px', textAlign: 'right' }}>{fmt2(f.insumos[n]?.costo)}</td>
+                            </React.Fragment>
+                          ))}
+                          <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700, color: '#166534', borderLeft: '1px solid #f1f5f9' }}>{fmt2(f.costo)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc', fontWeight: 800 }}>
+                        <td style={{ padding: '6px' }}>TOTAL</td>
+                        <td style={{ padding: '6px', textAlign: 'right' }}>{fmtQ(detallePorProducto.reduce((a, f) => a + f.volumen, 0))}</td>
+                        <td style={{ padding: '6px', textAlign: 'right' }}>{fmtQ(detallePorProducto.reduce((a, f) => a + f.paletas, 0))}</td>
+                        {nombresInsumos.map(n => (
+                          <React.Fragment key={n}>
+                            <td style={{ padding: '6px', textAlign: 'right' }}>{fmtQ(detallePorProducto.reduce((a, f) => a + (f.insumos[n]?.cantidad || 0), 0))}</td>
+                            <td style={{ padding: '6px', textAlign: 'right' }}>{fmt2(detallePorProducto.reduce((a, f) => a + (f.insumos[n]?.costo || 0), 0))}</td>
+                          </React.Fragment>
+                        ))}
+                        <td style={{ padding: '6px', textAlign: 'right', color: '#166534' }}>{fmt2(totalGeneral)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                    <thead style={{ background: '#f1f5f9' }}>
+                      <tr>
+                        <th style={{ padding: '6px', textAlign: 'left' }}>Material</th>
+                        {MESES.map(m => <th key={m} style={{ padding: '6px', textAlign: 'right' }}>{m}</th>)}
+                        <th style={{ padding: '6px', textAlign: 'right' }}>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ background: '#f8fafc', color: '#475569' }}>
+                        <td style={{ padding: '5px 6px', fontWeight: 600 }}>Volumen del mes</td>
+                        {detallePorMes.volumen.map((v, i) => <td key={i} style={{ padding: '5px 6px', textAlign: 'right' }}>{fmtQ(v)}</td>)}
+                        <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700 }}>{fmtQ(detallePorMes.volumen.reduce((a, v) => a + v, 0))}</td>
+                      </tr>
+                      {nombresInsumos.map(n => (
+                        <React.Fragment key={n}>
+                          <tr style={{ borderTop: '1px solid #e2e8f0' }}>
+                            <td style={{ padding: '5px 6px', fontWeight: 700 }}>{n} <span style={{ color: '#94a3b8', fontWeight: 400 }}>(cant.)</span></td>
+                            {detallePorMes.filas[n].cantidad.map((v, i) => <td key={i} style={{ padding: '5px 6px', textAlign: 'right' }}>{fmtQ(v)}</td>)}
+                            <td style={{ padding: '5px 6px', textAlign: 'right', fontWeight: 700 }}>{fmtQ(detallePorMes.filas[n].cantidad.reduce((a, v) => a + v, 0))}</td>
+                          </tr>
+                          <tr>
+                            <td style={{ padding: '3px 6px 6px 18px', color: '#64748b' }}>costo S/</td>
+                            {detallePorMes.filas[n].costo.map((v, i) => <td key={i} style={{ padding: '3px 6px 6px', textAlign: 'right', color: '#64748b' }}>{fmt2(v)}</td>)}
+                            <td style={{ padding: '3px 6px 6px', textAlign: 'right', color: '#166534', fontWeight: 700 }}>{fmt2(detallePorMes.filas[n].costo.reduce((a, v) => a + v, 0))}</td>
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                      <tr style={{ borderTop: '2px solid #cbd5e1', background: '#f8fafc', fontWeight: 800 }}>
+                        <td style={{ padding: '6px' }}>TOTAL S/</td>
+                        {MESES.map((m, i) => <td key={m} style={{ padding: '6px', textAlign: 'right' }}>{fmt2(nombresInsumos.reduce((a, n) => a + detallePorMes.filas[n].costo[i], 0))}</td>)}
+                        <td style={{ padding: '6px', textAlign: 'right', color: '#166534' }}>{fmt2(totalGeneral)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
 
         </div>
       </fieldset>
