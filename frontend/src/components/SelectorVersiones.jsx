@@ -237,7 +237,7 @@ export default function SelectorVersiones({ usuario, onSeleccionarVersion, onLog
                       ))}
                     </select>
                     <small style={{ color: '#64748b', fontSize: '11.5px', display: 'block', marginTop: '8px', lineHeight: '1.4' }}>
-                      Si selecciona una versión existente, se copiarán todos los registros de todas las áreas y módulos hacia este nuevo escenario.
+                      Si selecciona una versión existente, se copiarán todos los registros de todas las áreas y módulos (incluido lo importado, los costeos y la referencia del Excel) hacia este nuevo escenario. Una versión grande puede tardar unos segundos en aparecer completa.
                     </small>
                   </div>
                 )}

@@ -7,11 +7,14 @@ import {
   detectarTipo, leerProcesosProduccion, leerProyectado, decisionesDeProceso,
   registrosDeProyectado, porcentajesCalidad, registrosDeForecast,
 } from '../../config/importarExcel';
+import { leerDetalleCrisoles, leerDetalleFundente, registrosDeDetalle, totalesDetalle, CUENTAS_REEMPLAZADAS, MESES_P } from '../../config/importarProduccion';
 
 // =====================================================================
 // IMPORTAR EXCEL (solo administradores)
 // 1) Se eligen los archivos: proyectado de gastos, forecast de ventas y, opcional, los FP26 de
-//    producción (de ellos se toman los procesos sugeridos: trabajador y cuenta).
+//    producción. De ellos se toman los procesos sugeridos (trabajador y cuenta) y el DETALLE de
+//    materia prima y envases por insumo y producto, que reemplaza a los montos globales de esas
+//    cuentas; además el costo unitario del Excel queda como referencia para comparar el costeo.
 // 2) Vista previa: totales por área, procesos sugeridos (editables) y la distribución de Calidad.
 // 3) Se carga en una versión nueva o existente. Volver a importar el mismo tipo reemplaza lo anterior.
 // =====================================================================
@@ -37,11 +40,16 @@ async function leerArchivo(archivo) {
   await libro.xlsx.load(await archivo.arrayBuffer());
   const nombres = libro.worksheets.map(w => w.name);
   const esProduccion = nombres.some(n => ['CosCris', 'Remunr', 'Comp_FPROY'].includes(n));
-  const aLeer = esProduccion ? libro.worksheets.filter(w => ['CosCris', 'Remunr'].includes(w.name)) : [libro.worksheets[0]];
+  const aLeer = esProduccion ? libro.worksheets.filter(w => ['CosCris', 'Remunr', 'Costeo Fundente', 'Comp_FPROY', 'BOM', 'CostosUnit'].includes(w.name)) : [libro.worksheets[0]];
   const hojas = {};
   aLeer.forEach(ws => {
+    // En producción se conservan las filas vacías: separan los bloques de las hojas de costeo.
     const filas = [];
-    ws.eachRow({ includeEmpty: false }, (row) => { filas.push(row.values.slice(1).map(valorCelda)); });
+    ws.eachRow({ includeEmpty: esProduccion }, (row, n) => {
+      const valores = row.values.slice(1).map(valorCelda);
+      if (esProduccion) filas[n - 1] = valores; else filas.push(valores);
+    });
+    for (let i = 0; i < filas.length; i++) if (!filas[i]) filas[i] = [];
     hojas[ws.name] = filas;
   });
   if (esProduccion) nombres.forEach(n => { if (!hojas[n]) hojas[n] = []; });
@@ -91,13 +99,43 @@ export default function ImportarExcel() {
       movimientos = movimientos.concat(r.movimientos);
       Object.keys(avisos).forEach(k => { avisos[k] += r.avisos[k]; });
     });
+    // Detalle de materia prima y envases de los FP26 (Crisoles: CosCris; Fundente: Costeo Fundente + Comp_FPROY).
+    const detalles = [];
+    archivos.filter(a => a.tipo === 'produccion').forEach(a => {
+      const d = a.hojas.CosCris?.length ? leerDetalleCrisoles(a.hojas) : leerDetalleFundente(a.hojas);
+      if (d && (d.mp.length || d.envases.length) && !detalles.some(x => x.area === d.area)) detalles.push(d);
+    });
+    // Comparación con lo que el proyectado general trae en esas cuentas (el detalle lo reemplaza).
+    const comparacionDetalle = detalles.map(d => {
+      const t = totalesDetalle(d);
+      const general = { mp: Array(12).fill(0), env: Array(12).fill(0) };
+      movimientos.forEach(m => {
+        if (m.area !== d.area) return;
+        if (m.base.startsWith('6121')) general.mp[m.mes] += m.monto;
+        else if (m.base.startsWith('614')) general.env[m.mes] += m.monto;
+      });
+      const difs = [];
+      MESES_P.forEach((mes, i) => {
+        [['mp', 'materia prima'], ['env', 'envases']].forEach(([k, et]) => {
+          if (Math.abs(t[k][i] - general[k][i]) >= 1) difs.push(`${mes} ${et}: detalle ${fmt(t[k][i])} vs proyectado ${fmt(general[k][i])}`);
+        });
+      });
+      const suma = (arr) => arr.reduce((a, v) => a + v, 0);
+      return { area: d.area, mp: suma(t.mp), env: suma(t.env), mpGeneral: suma(general.mp), envGeneral: suma(general.env), difs, detalle: d };
+    });
+    // Los montos globales de esas cuentas se reemplazan por el detalle (solo si hay proyectado).
+    if (movimientos.length && detalles.length) {
+      const areasDetalle = detalles.map(d => d.area);
+      movimientos = movimientos.filter(m => !(areasDetalle.includes(m.area) && CUENTAS_REEMPLAZADAS.some(c => m.base.startsWith(c))));
+    }
     const decisiones = decisionesDeProceso(movimientos, procesos);
     const pctCalidad = porcentajesCalidad(movimientos);
     const forecastArchivo = archivos.find(a => a.tipo === 'forecast');
     const forecast = forecastArchivo ? registrosDeForecast(Object.values(forecastArchivo.hojas)[0], { idVersion: 'x', anio, tipoCambio }) : { registros: [], sinCuenta: [] };
     const porArea = {};
     movimientos.forEach(m => { porArea[m.area] = (porArea[m.area] || 0) + m.monto; });
-    return { procesos, movimientos, avisos, decisiones, pctCalidad, forecast, porArea };
+    if (movimientos.length) comparacionDetalle.forEach(c => { porArea[c.area] = (porArea[c.area] || 0) + c.mp + c.env; });
+    return { procesos, movimientos, avisos, decisiones, pctCalidad, forecast, porArea, comparacionDetalle };
   }, [archivos, anio, tipoCambio]);
 
   const areasDecision = [...new Set(analisis.decisiones.map(d => d.area))];
@@ -136,6 +174,13 @@ export default function ImportarExcel() {
       if (analisis.movimientos.length) {
         const gastos = registrosDeProyectado(analisis.movimientos, { idVersion, anio, elegidos, decisiones: analisis.decisiones });
         await enviar(idVersion, `IMPORT-GASTOS-${anio}`, gastos, 'Gastos', nombreArchivos);
+        // Detalle de producción: se envía siempre por área (vacío si no vino su FP26, así no queda
+        // un detalle anterior sumado a los montos globales del nuevo proyectado).
+        for (const [area, clave] of [['Producción Crisoles', 'CRI'], ['Producción Fundente', 'FUN']]) {
+          const c = analisis.comparacionDetalle.find(x => x.area === area);
+          const regs = c ? registrosDeDetalle(c.detalle, { idVersion, anio }) : [];
+          await enviar(idVersion, `IMPORT-DETALLE-${clave}-${anio}`, regs, `Detalle ${area}`, nombreArchivos);
+        }
         const gastosCalidad = gastos.filter(r => r.area === 'Calidad');
         if (gastosCalidad.length && Object.keys(analisis.pctCalidad).length) {
           const lote = generarDistribucionCalidad({ idVersion, gastosCalidad, porcentajes: analisis.pctCalidad, activar: true, fechaBase: `${anio}-01-01` });
@@ -162,14 +207,14 @@ export default function ImportarExcel() {
   const th = { padding: '7px 10px', fontSize: '11px', color: '#475569', textAlign: 'left', borderBottom: '2px solid #e2e8f0', background: '#f8fafc' };
   const td = { padding: '6px 10px', fontSize: '12.5px', borderBottom: '1px solid #f1f5f9' };
   const inp = { padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' };
-  const TIPOS = { proyectado: ['📊 Proyectado de gastos', '#2563eb'], forecast: ['📈 Forecast de ventas', '#16a34a'], produccion: ['🏭 Producción (procesos sugeridos)', '#ea580c'] };
+  const TIPOS = { proyectado: ['📊 Proyectado de gastos', '#2563eb'], forecast: ['📈 Forecast de ventas', '#16a34a'], produccion: ['🏭 Producción (procesos, detalle de MP y envases)', '#ea580c'] };
 
   return (
     <section style={{ flex: 1, padding: '24px', maxWidth: '1300px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' }}>Administración</div>
       <h2 style={{ margin: '4px 0 4px', fontSize: '22px', color: '#0f172a' }}>📥 Importar Excel</h2>
       <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '16px' }}>
-        Carga el proyectado de gastos y el forecast de ventas a una versión. Si agregas los archivos de producción (FP26), se usan sus procesos: el de cada trabajador (hoja Remunr) y el de cada cuenta (hoja CosCris).
+        Carga el proyectado de gastos y el forecast de ventas a una versión. Si agregas los archivos de producción (FP26), se usan sus procesos (hojas Remunr y CosCris) y se sube el detalle de materia prima y envases por insumo y producto (CosCris en Crisoles; Costeo Fundente y Comp_FPROY en Fundente), junto con el costo unitario del Excel para compararlo con el costeo del sistema.
       </div>
 
       {error && <div role="alert" style={{ ...card, background: '#fef2f2', borderColor: '#fecaca', color: '#b91c1c' }}>{error}</div>}
@@ -231,6 +276,31 @@ export default function ImportarExcel() {
                 {Object.keys(analisis.pctCalidad).length > 0 && (
                   <div style={{ marginTop: '10px', fontSize: '12.5px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '8px 10px' }}>
                     <b>Distribución de Calidad</b> (según cómo la repartía el Excel): {Object.entries(analisis.pctCalidad).map(([d, p]) => `${d.replace('Producción ', '')} ${p}%`).join(' · ')}. Se aplica automáticamente.
+                  </div>
+                )}
+              </div>
+            )}
+            {analisis.comparacionDetalle.length > 0 && (
+              <div>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr><th style={th}>Detalle de producción (FP26)</th><th style={{ ...th, textAlign: 'right' }}>Materia prima S/</th><th style={{ ...th, textAlign: 'right' }}>Envases S/</th></tr></thead>
+                  <tbody>
+                    {analisis.comparacionDetalle.map(c => (
+                      <React.Fragment key={c.area}>
+                        <tr><td style={{ ...td, fontWeight: 700 }}>{c.area} · detalle</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{fmt(c.mp)}</td><td style={{ ...td, textAlign: 'right', fontWeight: 700 }}>{fmt(c.env)}</td></tr>
+                        <tr><td style={{ ...td, color: '#64748b' }}>en el proyectado general</td><td style={{ ...td, textAlign: 'right', color: '#64748b' }}>{fmt(c.mpGeneral)}</td><td style={{ ...td, textAlign: 'right', color: '#64748b' }}>{fmt(c.envGeneral)}</td></tr>
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '6px' }}>
+                  {analisis.movimientos.length
+                    ? 'El detalle por insumo y producto reemplaza a esos montos globales (cuentas 6121 y 614x) y el costo unitario del Excel queda como referencia en el costeo.'
+                    : <b style={{ color: '#b91c1c' }}>Agrega también el archivo de proyectado: el detalle reemplaza a sus montos globales y no se importa solo.</b>}
+                </div>
+                {analisis.comparacionDetalle.some(c => c.difs.length) && (
+                  <div style={{ fontSize: '11px', color: '#b45309', marginTop: '6px' }}>
+                    Diferencias con el proyectado: {analisis.comparacionDetalle.flatMap(c => c.difs.map(d => `${c.area.replace('Producción ', '')} ${d}`)).join(' · ')}
                   </div>
                 )}
               </div>

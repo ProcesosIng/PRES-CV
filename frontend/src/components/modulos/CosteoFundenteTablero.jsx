@@ -3,6 +3,7 @@ import { listarForecastComercial, listarRegistros, listarTodosLosRegistros, guar
 import { MESES_F, TIPOS_F, normalF, costosFundente, calcularFundente, leerBomFP26, leerCostosFP26, bomDesdeOdoo } from '../../config/costeoFundente';
 import { imprimirElemento } from '../../config/impresion';
 import { exportarTablasHtml } from '../../config/excel';
+import { MODULO_REFERENCIA } from '../../config/importarProduccion';
 
 // =====================================================================
 // COSTEO DE FUNDENTE — pantalla completa, por pedido (como Comp_FPROY del Excel FP26 Fundente).
@@ -53,10 +54,14 @@ function TableroFundente({ idVersion, area, usuario, anio, setAnio }) {
   const idConfig = `COSTEO-FUN-CFG-${idVersion}-${anio}`;
   const guardado = useMemo(() => listarRegistros({ idVersion, area, modulo: MODULO }).find(r => r.id_registro === idConfig)?.detalle_columnas || {}, [idVersion, area, anio, recarga]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Costeo del Excel FP26 importado en esta versión: pedidos con su costo unitario, BOM, costos y sachet.
+  const referencia = useMemo(() => listarRegistros({ idVersion, area, modulo: MODULO_REFERENCIA })
+    .find(r => String(r.detalle_columnas?.anio_proyeccion) === anio && Array.isArray(r.detalle_columnas?.pedidos))?.detalle_columnas || null, [idVersion, area, anio]);
   const [parametros, setParametros] = useState(() => ({ tipoCambio: 3.5, fuenteMP: 'bom', ...(guardado.parametros || {}) }));
-  const [bom, setBom] = useState(() => guardado.bom || {});
-  const [costosComp, setCostosComp] = useState(() => guardado.costos_componentes || {});
-  const [sachet, setSachet] = useState(() => guardado.sachet || {});
+  // Lo guardado en el costeo manda; si no hay, se usa lo que vino con la importación del FP26.
+  const [bom, setBom] = useState(() => ({ ...(referencia?.bom || {}), ...(guardado.bom || {}) }));
+  const [costosComp, setCostosComp] = useState(() => ({ ...(referencia?.costos_componentes || {}), ...(guardado.costos_componentes || {}) }));
+  const [sachet, setSachet] = useState(() => ({ ...(referencia?.sachet || {}), ...(guardado.sachet || {}) }));
   const [cargando, setCargando] = useState('');
   const [verPedidos, setVerPedidos] = useState(false);
   const [filtro, setFiltro] = useState('');
@@ -148,6 +153,39 @@ function TableroFundente({ idVersion, area, usuario, anio, setAnio }) {
       {s && <div style={{ fontSize: '11px', color: '#64748b' }}>{s}</div>}
     </div>
   );
+  // Comparación por producto con el Excel (US$ por kg, ponderado por kg).
+  const comparacion = useMemo(() => {
+    if (!referencia) return [];
+    const ex = {};
+    referencia.pedidos.forEach(p => {
+      const k = normalF(p.producto);
+      if (!ex[k]) ex[k] = { producto: p.producto, kg: 0, total: 0, mp: 0, env: 0 };
+      ex[k].kg += num(p.kg); ex[k].total += num(p.totalUsd); ex[k].mp += num(p.mpUsd); ex[k].env += num(p.envUsd);
+    });
+    const sis = Object.fromEntries(res.productos.map(p => [normalF(p.producto), p]));
+    const dif = (a, b) => (a > 0 && b > 0 ? (a - b) / b : null);
+    return [...new Set([...Object.keys(ex), ...Object.keys(sis)])].map(k => {
+      const e = ex[k]; const s = sis[k];
+      const kgS = s?.kg || 0; const kgE = e?.kg || 0;
+      const r = {
+        producto: s?.producto || e?.producto, kgSis: kgS, kgEx: kgE,
+        sis: kgS ? s.total / kgS / tc : 0, ex: kgE ? e.total / kgE : 0,
+        mpSis: kgS ? s.mp / kgS / tc : 0, mpEx: kgE ? e.mp / kgE : 0,
+        envSis: kgS ? s.env / kgS / tc : 0, envEx: kgE ? e.env / kgE : 0,
+      };
+      return { ...r, dif: dif(r.sis, r.ex), costoSis: s?.total || 0, costoEx: e?.total || 0 };
+    }).sort((a, b) => b.kgSis - a.kgSis || b.kgEx - a.kgEx);
+  }, [referencia, res, tc]);
+  const compTotal = useMemo(() => {
+    const kgS = comparacion.reduce((a, c) => a + c.kgSis, 0);
+    const kgE = comparacion.reduce((a, c) => a + c.kgEx, 0);
+    const s = kgS ? comparacion.reduce((a, c) => a + c.costoSis, 0) / kgS / tc : 0;
+    const e = kgE ? comparacion.reduce((a, c) => a + c.costoEx, 0) / kgE : 0;
+    return { sis: s, ex: e, dif: s > 0 && e > 0 ? (s - e) / e : null };
+  }, [comparacion, tc]);
+  const colorDif = (d) => (d === null || d === undefined ? '#94a3b8' : Math.abs(d) <= 0.03 ? '#15803d' : Math.abs(d) <= 0.1 ? '#b45309' : '#dc2626');
+  const textoDif = (d) => (d === null || d === undefined ? '—' : `${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%`);
+
   const productosVista = res.productos.filter(p => !filtro || normalF(p.producto).includes(normalF(filtro)));
 
   return (
@@ -187,6 +225,7 @@ function TableroFundente({ idVersion, area, usuario, anio, setAnio }) {
           {cargando && <span style={{ fontSize: '12px', color: '#7c3aed' }}>⏳ {cargando}</span>}
         </div>
         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>
+          {referencia && <>BOM, costos de componentes y sachet tomados del FP26 importado en esta versión. </>}
           {productosForecast.filter(p => bom[normalF(p)]).length} de {productosForecast.length} productos con BOM · {componentesUsados.length} componentes. Envases, MOD y CIF registrados en {area} se reparten por kg del mes; los marcados "Sachet" solo a pedidos en sachet (p. ej. personal externo).
         </div>
       </div>
@@ -240,6 +279,45 @@ function TableroFundente({ idVersion, area, usuario, anio, setAnio }) {
             </table>
           </div>
         </div>
+
+        {comparacion.length > 0 && (
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <h3 style={{ ...h3, margin: 0 }}>🔍 Comparación con el costeo del Excel {anio} (US$ por kg)</h3>
+              <div style={{ fontSize: '12.5px', fontWeight: 700 }}>
+                Promedio: sistema US$ {fmt(compTotal.sis, 3)} · Excel US$ {fmt(compTotal.ex, 3)} · <span style={{ color: colorDif(compTotal.dif) }}>{textoDif(compTotal.dif)}</span>
+              </div>
+            </div>
+            <div style={{ fontSize: '11px', color: '#64748b', margin: '6px 0 8px' }}>
+              Excel: COSTO TOTAL UNITARIO 2026 de Comp_FPROY (FP26 importado), promedio ponderado por kg de sus pedidos. Sistema: el cálculo de esta pantalla. Diferencia = (Sistema − Excel) ÷ Excel; verde hasta 3%, ámbar hasta 10%.
+            </div>
+            <div style={{ overflow: 'auto', maxHeight: '520px' }}>
+              <table data-hoja="Comparación Excel" style={{ borderCollapse: 'collapse', width: '100%' }}>
+                <thead><tr>
+                  <th style={{ ...th, textAlign: 'left' }}>Producto</th><th style={th}>Kg sistema</th><th style={th}>Kg Excel</th>
+                  <th style={th}>MP sistema</th><th style={th}>MP Excel</th><th style={th}>Envases sistema</th><th style={th}>Envases Excel</th>
+                  <th style={th}>Total sistema</th><th style={th}>Total Excel</th><th style={th}>Diferencia</th>
+                </tr></thead>
+                <tbody>
+                  {comparacion.filter(c => !filtro || normalF(c.producto).includes(normalF(filtro))).map(c => (
+                    <tr key={c.producto}>
+                      <td style={{ ...tdL, fontWeight: 700 }}>{c.producto}</td>
+                      <td style={td} data-valor={c.kgSis} data-formato="entero">{fmt(c.kgSis, 0)}</td>
+                      <td style={td} data-valor={c.kgEx} data-formato="entero">{fmt(c.kgEx, 0)}</td>
+                      <td style={td} data-valor={c.mpSis} data-formato="numero">{fmt(c.mpSis, 3)}</td>
+                      <td style={{ ...td, color: '#7c3aed' }} data-valor={c.mpEx} data-formato="numero">{fmt(c.mpEx, 3)}</td>
+                      <td style={td} data-valor={c.envSis} data-formato="numero">{fmt(c.envSis, 3)}</td>
+                      <td style={{ ...td, color: '#7c3aed' }} data-valor={c.envEx} data-formato="numero">{fmt(c.envEx, 3)}</td>
+                      <td style={{ ...td, fontWeight: 800 }} data-valor={c.sis} data-formato="numero">{fmt(c.sis, 3)}</td>
+                      <td style={{ ...td, fontWeight: 800, color: '#7c3aed' }} data-valor={c.ex} data-formato="numero">{fmt(c.ex, 3)}</td>
+                      <td style={{ ...td, fontWeight: 800, color: colorDif(c.dif) }} data-valor={c.dif ?? ''} data-formato="pct">{textoDif(c.dif)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div style={card}>
           <h3 style={h3}>📅 Costo por kg por mes (US$)</h3>

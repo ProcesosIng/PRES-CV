@@ -764,6 +764,7 @@ app.get('/api/maestros/productos/historial', async (req, res) => {
 // ----------------------------------------------------
 // EJECUTADO PARA EL ESTADO DE RESULTADOS (Odoo, asientos publicados)
 // Saldo (debe - haber) por cuenta y mes de las clases 6, 7, 8 y 9 del año pedido.
+// Incluye el mes en curso (aún abierto: asientos por saldar); los reportes lo marcan y se filtra con los meses.
 // La clasificación en líneas del EERR se hace en el frontend (config/eerr.js).
 // ----------------------------------------------------
 app.get('/api/eerr/ejecutado', async (req, res) => {

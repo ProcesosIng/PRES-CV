@@ -202,6 +202,15 @@ export function crearVersion({ nombre, estado = 'Borrador', clonarDesde = '' }) 
   };
   db.versiones.push(nuevaVersion);
 
+  // Con servidor, la copia la hace el servidor (conserva los ids y no depende del tamaño de la versión).
+  if (clonarDesde && modo === 'servidor') {
+    guardarDB(db);
+    sincronizar('duplicar versión', () => api('/versiones', { method: 'POST', body: { version: nuevaVersion, clonar_desde: clonarDesde } }), () => {
+      inicializarDatos().then(() => emitir('presupuesto:recargado'));
+    });
+    return nuevaVersion;
+  }
+
   if (clonarDesde) {
     const registrosOrigen = db.registros.filter(r => r.id_version === clonarDesde);
     const registrosClonados = registrosOrigen.map(r => ({
