@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import ReporteGantt, { MESES_CORTOS, mesesVacios, totalMontoGrupos } from './ReporteGantt';
 import EstadoResultados from './EstadoResultados';
+import PlanCompras from './PlanCompras';
 import GastosProyVsEjec from './GastosProyVsEjec';
 import { listarVersiones } from '../../data/store';
 import { exportarExcel, exportarTablasHtml } from '../../config/excel';
@@ -40,12 +41,10 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
   const [anioGantt, setAnioGantt] = useState('');
   const [filtroUnidadNegocio, setFiltroUnidadNegocio] = useState('');
   const [centroProduccion, setCentroProduccion] = useState('');
-  const [modoCompras, setModoCompras] = useState('modulo');
 
   // Estados de ordenamiento seguros
   const [ordenGeneral, setOrdenGeneral] = useState({ columna: 'fecha_proyeccion', direccion: 'asc' });
   const [ordenGastos, setOrdenGastos] = useState({ columna: 'total', direccion: 'desc' });
-  const [ordenCompras] = useState({ columna: 'fecha', direccion: 'asc' });
 
   const calidadRepartida = useMemo(
     () => new Set(registrosTotales.map(r => r.detalle_columnas?.origen_calidad).filter(Boolean)),
@@ -71,7 +70,7 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
 
       if (omitir !== 'version' && filtroVersion && reg.id_version !== filtroVersion) return false;
       // Cada filtro solo aplica en las pestañas donde se muestra.
-      const usaModuloArea = ['general', 'gastos_areas', 'compras'].includes(tipoReporte);
+      const usaModuloArea = ['general', 'gastos_areas'].includes(tipoReporte);
       if (omitir !== 'modulo' && usaModuloArea && filtroModulo && reg.modulo !== filtroModulo) return false;
 
       const areaReg = reg.area || dc.area || '';
@@ -236,130 +235,8 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
     setAreasExpandidas(prev => ({ ...prev, [area]: !prev[area] }));
   };
 
-  // 3. Plan de Compras (Con filtro de fechas y buscador de producto integrado)
-  const resumenPlanCompras = useMemo(() => {
-    const modulosPermitidos = [
-      'Uniforme - EPPs',
-      'Utiles de Oficina',
-      'Materias Primas',
-      'Suministros',
-      'Materiales Auxiliares y Suministros',
-      'Envases y Embalajes'
-    ];
-    // Los insumos de los costeos llegan por sus registros DERIVADOS (Materias Primas, Envases...).
-    // El forecast es venta, no compra: no entra aquí.
+  // 3. Plan de Compras: tablero propio (PlanCompras.jsx, categorías en config/planCompras.js).
 
-    const filasPlan = [];
-
-    const cumpleFiltroFecha = (fechaStr) => {
-      if (!fechaStr) return true;
-      let fechaNorm = fechaStr;
-      if (fechaStr.includes('/')) {
-        const partes = fechaStr.split('/');
-        if (partes.length === 3 && partes[2].length === 4) {
-          fechaNorm = `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}`;
-        }
-      }
-      if (fechaDesde && fechaNorm < fechaDesde) return false;
-      if (fechaHasta && fechaNorm > fechaHasta) return false;
-      return true;
-    };
-
-    registrosFiltrados.forEach(reg => {
-      const dc = reg.detalle_columnas || {};
-      const fechaBase = reg.fecha_proyeccion || '2027-01-01';
-      const modulo = reg.modulo || 'General';
-      const cuenta = dc.cuenta_afectada || dc.cuenta || dc.numero_cuenta || 'S/C';
-
-      if (modulo.startsWith('Costeo de') || modulo === 'Forecast de Ventas') {
-        return;
-      }
-      if (modulo === 'Uniforme - EPPs' || modulo === 'Uniformes - EPPs') {
-        const filasEpps = reg.variables_registro?.filasEpps || [];
-        if (filasEpps.length > 0) {
-          filasEpps.forEach(itemEpp => {
-            const nombreEpp = itemEpp.producto || itemEpp.epp_nombre || 'Artículo EPP';
-            const cantidadEpp = parseFloat(itemEpp.cantidad) || 1;
-            const costoTotalReg = parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-            const costoUnitarioEpp = filasEpps.length > 0 ? (costoTotalReg / filasEpps.length) : costoTotalReg;
-
-            if (cumpleFiltroFecha(fechaBase)) {
-              filasPlan.push({
-                fecha: fechaBase,
-                modulo: 'Uniforme - EPPs',
-                cuenta,
-                producto: nombreEpp.trim(),
-                cantidad: cantidadEpp,
-                totalCosto: cantidadEpp * costoUnitarioEpp
-              });
-            }
-          });
-        } else {
-          let productoLimpio = dc.producto || dc.epp_nombre || reg.empleado_nombre || dc.detalle || 'EPP / Uniforme';
-          const costo = parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-          const cantidad = dc.cantidad !== undefined ? parseFloat(dc.cantidad) || 1 : 1;
-
-          if (cumpleFiltroFecha(fechaBase)) {
-            filasPlan.push({
-              fecha: fechaBase,
-              modulo,
-              cuenta,
-              producto: productoLimpio.trim(),
-              cantidad,
-              totalCosto: costo
-            });
-          }
-        }
-      }
-      else if (modulosPermitidos.includes(modulo) || dc.es_derivado) {
-        // 🛠️ CORRECCIÓN: Priorizamos descripcion_material antes que el empleado_nombre
-        let productoLimpio = dc.descripcion_material || dc.producto || dc.detalle || dc.descripcion_cuenta || 'Insumo / Gasto';
-        
-        if (productoLimpio.includes(' - ')) productoLimpio = productoLimpio.split(' - ').pop();
-        if (productoLimpio.includes('COSTEO AUTOMÁTICO - ')) productoLimpio = productoLimpio.replace('COSTEO AUTOMÁTICO - ', '');
-
-        const costo = parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-        const cantidad = dc.cantidad !== undefined ? parseFloat(dc.cantidad) || 0 : (parseFloat(dc.unidades) || 1);
-
-        if (cumpleFiltroFecha(fechaBase)) {
-          filasPlan.push({
-            fecha: fechaBase,
-            modulo,
-            cuenta,
-            producto: productoLimpio.trim(),
-            cantidad,
-            totalCosto: costo
-          });
-        }
-      }
-    });
-
-    let resultadoFinal = filasPlan;
-    if (filtroPersona) {
-      const queryBusqueda = filtroPersona.toLowerCase();
-      resultadoFinal = filasPlan.filter(item => 
-        item.producto.toLowerCase().includes(queryBusqueda) ||
-        item.cuenta.toLowerCase().includes(queryBusqueda) ||
-        item.modulo.toLowerCase().includes(queryBusqueda)
-      );
-    }
-
-    return resultadoFinal.sort((a, b) => {
-      let valA = a[ordenCompras.columna];
-      let valB = b[ordenCompras.columna];
-
-      if (typeof valA === 'number' && typeof valB === 'number') {
-        return ordenCompras.direccion === 'asc' ? valA - valB : valB - valA;
-      }
-
-      valA = valA !== undefined && valA !== null ? String(valA).toLowerCase() : '';
-      valB = valB !== undefined && valB !== null ? String(valB).toLowerCase() : '';
-
-      if (valA < valB) return ordenCompras.direccion === 'asc' ? -1 : 1;
-      if (valA > valB) return ordenCompras.direccion === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [registrosFiltrados, ordenCompras, fechaDesde, fechaHasta, filtroPersona]);
 
 
   // ===================== VISTAS GANTT =====================
@@ -371,23 +248,17 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
   const esCosteoProduccion = (m) => String(m || '').startsWith('Costeo de') && m !== 'Costeo de Embalajes';
 
   // Años con datos en la pestaña actual (el Gantt muestra un año a la vez).
-  // En Compras se toman solo los años que tienen COMPRAS: si se usaran todos los registros,
-  // un año con solo remuneraciones (p. ej. 2026) quedaba elegido y la matriz salía vacía.
   const aniosGantt = useMemo(() => {
     const set = new Set();
-    if (tipoReporte === 'compras') {
-      resumenPlanCompras.forEach(item => { const f = numMesDe(item.fecha); if (f) set.add(f.anio); });
-    } else {
-      registrosTotales.forEach(reg => {
-        const incluir = tipoReporte === 'forecast' ? reg.modulo === 'Forecast de Ventas'
-          : tipoReporte === 'produccion' ? esCosteoProduccion(reg.modulo) : false;
-        if (!incluir) return;
-        const a = anioDeRegistro(reg);
-        if (a) set.add(a);
-      });
-    }
+    registrosTotales.forEach(reg => {
+      const incluir = tipoReporte === 'forecast' ? reg.modulo === 'Forecast de Ventas'
+        : tipoReporte === 'produccion' ? esCosteoProduccion(reg.modulo) : false;
+      if (!incluir) return;
+      const a = anioDeRegistro(reg);
+      if (a) set.add(a);
+    });
     return Array.from(set).sort();
-  }, [registrosTotales, resumenPlanCompras, tipoReporte]);
+  }, [registrosTotales, tipoReporte]);
 
   const anioActivoGantt = aniosGantt.includes(anioGantt) ? anioGantt : (aniosGantt[0] || '');
 
@@ -405,33 +276,6 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
     celda.monto += monto;
     if (origen) celda.origen[origen] = (celda.origen[origen] || 0) + cantidad;
   };
-
-  // PLAN DE COMPRAS: módulo (izquierda) -> producto; o todo totalizado por producto.
-  const ganttCompras = useMemo(() => {
-    const grupos = {};
-    resumenPlanCompras.forEach(item => {
-      const f = numMesDe(item.fecha);
-      if (!f || f.anio !== anioActivoGantt) return;
-      const nombreBase = item.producto.replace(/\s*\([^)]*\)\s*$/, '').trim() || item.producto;
-      const paraQue = (item.producto.match(/\(([^)]*)\)\s*$/) || [])[1];
-      const claveGrupo = modoCompras === 'modulo' ? item.modulo : 'TODOS';
-      const titulo = modoCompras === 'modulo' ? item.modulo : 'Todos los productos a comprar';
-      if (!grupos[claveGrupo]) grupos[claveGrupo] = { clave: claveGrupo, titulo, filas: {} };
-      const claveFila = modoCompras === 'modulo' ? item.producto : nombreBase.toUpperCase();
-      if (!grupos[claveGrupo].filas[claveFila]) {
-        grupos[claveGrupo].filas[claveFila] = { clave: claveFila, titulo: modoCompras === 'modulo' ? item.producto : nombreBase, subtitulo: '', meses: mesesVacios(), _origenes: new Set() };
-      }
-      const fila = grupos[claveGrupo].filas[claveFila];
-      const origen = paraQue ? `${item.modulo} · ${paraQue}` : item.modulo;
-      fila._origenes.add(item.modulo);
-      acumular(fila, f.mes, item.cantidad || 0, item.totalCosto || 0, origen);
-    });
-    Object.values(grupos).forEach(g => Object.values(g.filas).forEach(f => {
-      f.subtitulo = modoCompras === 'total' ? `Origen: ${Array.from(f._origenes).join(', ')}` : '';
-      delete f._origenes;
-    }));
-    return agruparEnGrupos(grupos);
-  }, [resumenPlanCompras, anioActivoGantt, modoCompras]);
 
   // FORECAST: unidad de negocio -> producto (suma de clientes). Cantidad esperada e ingreso en soles.
   const ganttForecast = useMemo(() => {
@@ -509,7 +353,6 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
 
   const granTotal = useMemo(() => {
     if (tipoReporte === 'forecast') return totalMontoGrupos(ganttForecast);
-    if (tipoReporte === 'compras') return totalMontoGrupos(ganttCompras);
     if (tipoReporte === 'produccion') return totalMontoGrupos(ganttProduccion);
     if (tipoReporte === 'gastos_areas') {
       return resumenGastosAreas.reduce((acc, i) => acc + i.total, 0);
@@ -521,7 +364,7 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
         : parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
       return acc + valor;
     }, 0);
-  }, [registrosFiltrados, tipoReporte, resumenGastosAreas, ganttForecast, ganttCompras, ganttProduccion]);
+  }, [registrosFiltrados, tipoReporte, resumenGastosAreas, ganttForecast, ganttProduccion]);
 
   const limpiarFiltros = () => {
     setFiltroVersion('');
@@ -545,7 +388,7 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
   // Filtros activos, para dejarlos anotados en el Excel.
   const describirFiltros = () => [
     filtroVersion && `Versión: ${filtroVersion.toUpperCase()}`, filtroArea && `Área: ${filtroArea}`, filtroModulo && `Módulo: ${filtroModulo}`,
-    ['forecast', 'compras', 'produccion'].includes(tipoReporte) && anioActivoGantt && `Año: ${anioActivoGantt}`,
+    ['forecast', 'produccion'].includes(tipoReporte) && anioActivoGantt && `Año: ${anioActivoGantt}`,
     centroProduccion && `Centro: ${centroProduccion}`, filtroUnidadNegocio && `Unidad de negocio: ${filtroUnidadNegocio}`,
     filtroCliente && `Cliente: ${filtroCliente}`, filtroVendedor && `Vendedor: ${filtroVendedor}`, filtroMoneda && `Moneda: ${filtroMoneda}`,
     filtroPersona && `Búsqueda: ${filtroPersona}`, fechaDesde && `Desde: ${fechaDesde}`, fechaHasta && `Hasta: ${fechaHasta}`,
@@ -564,18 +407,18 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
     try {
       setExportando(true);
       // EERR y Gastos Proy. vs Ejec.: se exportan las tablas tal como se ven, con todos los niveles abiertos.
-      if (tipoReporte === 'eerr' || tipoReporte === 'gastos_pve') {
+      if (tipoReporte === 'eerr' || tipoReporte === 'gastos_pve' || tipoReporte === 'compras') {
         await new Promise(r => setTimeout(r, 60)); // deja que se rendericen los niveles desplegados
         await exportarTablasHtml({ contenedor: refContenido.current, nombreArchivo: archivo, titulo, subtitulo });
         return;
       }
 
-      const ganttActual = { forecast: ganttForecast, compras: ganttCompras, produccion: ganttProduccion }[tipoReporte];
+      const ganttActual = { forecast: ganttForecast, produccion: ganttProduccion }[tipoReporte];
       if (ganttActual) {
         if (ganttActual.length === 0) throw new Error('No hay datos para exportar con los filtros seleccionados.');
         const filas = [];
         ganttActual.forEach(g => g.filas.forEach(f => filas.push({ grupo: g.titulo, detalle: f.titulo, info: f.subtitulo || '', meses: f.meses })));
-        const etiquetaCant = { forecast: 'Cant.', compras: 'Cant.', produccion: 'Cant.' }[tipoReporte];
+        const etiquetaCant = 'Cant.';
         await exportarExcel(archivo, [{
           nombre: titulo, titulo: `${titulo} ${anioActivoGantt || ''}`, subtitulo,
           columnas: [
@@ -667,7 +510,7 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
             {exportando ? 'Generando Excel...' : '📥 Exportar a Excel'}
           </button>
           
-          {!['eerr', 'gastos_pve'].includes(tipoReporte) && (
+          {!['eerr', 'gastos_pve', 'compras'].includes(tipoReporte) && (
           <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
             <div style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>
               {{ forecast: 'INGRESO PROYECTADO (US$ convertido a S/)', compras: 'COSTO DE COMPRAS', produccion: 'COSTO DE PRODUCCIÓN' }[tipoReporte] || 'TOTAL FILTRADO'}
@@ -766,49 +609,6 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
               <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>BUSCAR PRODUCTO / CLIENTE</label>
                 <input type="text" placeholder="Producto o cliente..." value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
-              </div>
-            </>
-          )}
-
-          {/* Filtros exclusivos para PLAN DE COMPRAS */}
-          {tipoReporte === 'compras' && (
-            <>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>AÑO</label>
-                <select value={anioActivoGantt} onChange={e => setAnioGantt(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                  {aniosGantt.length === 0 && <option value="">Sin datos</option>}
-                  {aniosGantt.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>MÓDULO</label>
-                <select value={filtroModulo} onChange={e => setFiltroModulo(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                  <option value="">Todos los módulos</option>
-                  {modulosDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>ÁREA</label>
-                <select value={filtroArea} onChange={e => setFiltroArea(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }}>
-                  <option value="">Todas las áreas</option>
-                  {areasDisponibles.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </div>
-
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>BUSCAR PRODUCTO / INSUMO</label>
-                <input type="text" placeholder="Ej. Crisol, EPP..." value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
-              </div>
-
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>DESDE (MES/FECHA)</label>
-                <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
-              </div>
-
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: '10px', fontWeight: 600, color: '#64748b' }}>HASTA (MES/FECHA)</label>
-                <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} style={{ width: '100%', padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' }} />
               </div>
             </>
           )}
@@ -966,22 +766,6 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
         </div>
       )}
 
-      {/* 3. REPORTE PLAN DE COMPRAS */}
-      {tipoReporte === 'compras' && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', margin: 0 }}>🛒 Plan de Compras {anioActivoGantt}</h3>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Ver:</span>
-              {[['modulo', 'Por módulo de origen'], ['total', 'Totalizado por producto']].map(([id, label]) => (
-                <button key={id} type="button" onClick={() => setModoCompras(id)} style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, background: modoCompras === id ? '#2563eb' : 'white', color: modoCompras === id ? 'white' : '#475569', border: modoCompras === id ? '1px solid #2563eb' : '1px solid #cbd5e1' }}>{label}</button>
-              ))}
-            </div>
-          </div>
-          <ReporteGantt grupos={ganttCompras} etiquetaCantidad="Cantidad a comprar" etiquetaMonto="Costo" colorBase="22, 163, 74" vacio="No hay compras para los filtros seleccionados." />
-        </div>
-      )}
-
       {/* 4. REPORTE PLAN DE PRODUCCIÓN */}
       {tipoReporte === 'produccion' && (
         <div>
@@ -994,7 +778,13 @@ export default function ReporteGeneral({ registrosTotales = [], usuario = null }
       )}
 
       {/* 5. REPORTE GENERAL CONSOLIDADO (CON VISTA AGRUPADA Y DETALLADA) */}
+      {/* Tableros que se exportan a Excel tal como se ven (refContenido) */}
       <div ref={refContenido}>
+      {/* 3. REPORTE PLAN DE COMPRAS (tablero; categorías en config/planCompras.js) */}
+      {tipoReporte === 'compras' && (
+        <PlanCompras registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} expandirTodo={exportando} />
+      )}
+
       {tipoReporte === 'gastos_pve' && (
         <GastosProyVsEjec registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} expandirTodo={exportando} />
       )}
