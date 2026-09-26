@@ -121,19 +121,27 @@ CREATE TABLE IF NOT EXISTS ppto_forecast_mensual (
   margen_soles      NUMERIC(18,2) NOT NULL DEFAULT 0
 );
 
+-- Tipo de negocio (Fire Assay / Procesos) y cuentas 70x (venta) y 69x (costo) según línea y zona.
+ALTER TABLE ppto_forecast_mensual ADD COLUMN IF NOT EXISTS tipo_negocio VARCHAR(40);
+ALTER TABLE ppto_forecast_mensual ADD COLUMN IF NOT EXISTS cuenta_venta TEXT;
+ALTER TABLE ppto_forecast_mensual ADD COLUMN IF NOT EXISTS cuenta_costo TEXT;
+
 CREATE INDEX IF NOT EXISTS ix_ppto_forecast_registro ON ppto_forecast_mensual (id_registro);
 CREATE INDEX IF NOT EXISTS ix_ppto_forecast_reporte  ON ppto_forecast_mensual (id_version, anio, producto, mes);
 
 -- Detalle del forecast sin eliminados (por producto, cliente y mes).
-CREATE OR REPLACE VIEW v_ppto_forecast AS
+-- Se recrean (DROP) porque f.* cambia cuando la tabla gana columnas.
+DROP VIEW IF EXISTS v_ppto_forecast_producto_mes;
+DROP VIEW IF EXISTS v_ppto_forecast;
+CREATE VIEW v_ppto_forecast AS
 SELECT f.*, v.nombre AS version_nombre, r.creado_por, r.actualizado_por, r.actualizado_en
   FROM ppto_forecast_mensual f
   JOIN ppto_registros r ON r.id_registro = f.id_registro AND NOT r.eliminado
   JOIN ppto_versiones v ON v.id_version = f.id_version AND NOT v.eliminado;
 
 -- Totales por PRODUCTO y MES (suma de todos los clientes), en soles.
-CREATE OR REPLACE VIEW v_ppto_forecast_producto_mes AS
-SELECT id_version, anio, mes, unidad_negocio, codigo_producto, producto, um,
+CREATE VIEW v_ppto_forecast_producto_mes AS
+SELECT id_version, anio, mes, tipo_negocio, unidad_negocio, codigo_producto, producto, um,
        SUM(cantidad)          AS cantidad,
        SUM(cantidad_esperada) AS cantidad_esperada,
        SUM(ingreso_soles)     AS ingreso_soles,
@@ -142,7 +150,7 @@ SELECT id_version, anio, mes, unidad_negocio, codigo_producto, producto, um,
        CASE WHEN SUM(cantidad_esperada) > 0 THEN ROUND(SUM(ingreso_soles) / SUM(cantidad_esperada), 4) END AS precio_promedio_soles,
        CASE WHEN SUM(cantidad_esperada) > 0 THEN ROUND(SUM(costo_soles)   / SUM(cantidad_esperada), 4) END AS costo_promedio_soles
   FROM v_ppto_forecast
- GROUP BY id_version, anio, mes, unidad_negocio, codigo_producto, producto, um;
+ GROUP BY id_version, anio, mes, tipo_negocio, unidad_negocio, codigo_producto, producto, um;
 
 -- Historial de cambios: valor anterior y nuevo de cada creación, edición, eliminación o restauración.
 CREATE TABLE IF NOT EXISTS ppto_auditoria (

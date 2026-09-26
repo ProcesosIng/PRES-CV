@@ -29,7 +29,7 @@ export const PROCESOS_FUNDENTE = ['Granel', 'Sachet'];
 // "PRODUCTO" del Excel de forecast). Se usan como select en el formulario
 // de Forecast de Ventas, y Costeo de Crisoles/Fundente filtran por estos
 // valores exactos ('CCS' y 'Fundente').
-export const UNIDADES_NEGOCIO = ['CCS', 'Carbon Activado', 'Epp', 'Copelas', 'Bolas de acero', 'Crisoles de Arcilla', 'Fundente', 'Floculantes', 'Insumos'];
+export const UNIDADES_NEGOCIO = ['CCS', 'Carbon Activado', 'Epp', 'Copelas', 'Bolas de acero', 'Crisoles de Arcilla', 'Fundente', 'Floculantes', 'Insumos', 'Polvo Zn', 'Equipos', 'Servicios'];
 
 export const TIPOS_CLIENTE = ['Minera', 'Distribuidor', 'Laboratorio', 'Manufactura'];
 export const TIPOS_ZONA = ['Local', 'Exterior'];

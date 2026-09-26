@@ -1,0 +1,204 @@
+{
+ "Bolas de acero|Exterior": {
+  "venta": [
+   "7011160",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6911160",
+   "Mercaderías - Mercaderías - exportación - Terceros-Otros Productos"
+  ]
+ },
+ "Carbon Activado|Exterior": {
+  "venta": [
+   "7011110",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Carbon Activado"
+  ],
+  "costo": [
+   "6911110",
+   "Mercaderías - Mercaderías - exportación - Terceros Carbon Activado"
+  ]
+ },
+ "CCS|Exterior": {
+  "venta": [
+   "7011130",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Crisoles de Carburo"
+  ],
+  "costo": [
+   "6911130",
+   "Mercaderías - Mercaderías - exportación - Terceros Crisoles de Carburo"
+  ]
+ },
+ "Copelas|Exterior": {
+  "venta": [
+   "7011140",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Copelas"
+  ],
+  "costo": [
+   "6911140",
+   "Mercaderías - Mercaderías - exportación - Terceros Copelas"
+  ]
+ },
+ "Crisoles de Arcilla|Exterior": {
+  "venta": [
+   "7021110",
+   "Productos terminados - Productos terminados - venta de exportación - Terceros - Crisoles de Arcilla"
+  ],
+  "costo": [
+   "6921110",
+   "Productos terminados - Productos terminados - Exportación - Terceros - Crisoles"
+  ]
+ },
+ "Floculantes|Exterior": {
+  "venta": [
+   "7011160",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6911160",
+   "Mercaderías - Mercaderías - exportación - Terceros-Otros Productos"
+  ]
+ },
+ "Fundente|Exterior": {
+  "venta": [
+   "7021120",
+   "Productos terminados - Productos terminados - venta de exportación - Terceros - Fundente"
+  ],
+  "costo": [
+   "6921120",
+   "Productos terminados - Productos terminados - Exportación - Terceros - Fundente"
+  ]
+ },
+ "Insumos|Exterior": {
+  "venta": [
+   "7011160",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6911160",
+   "Mercaderías - Mercaderías - exportación - Terceros-Otros Productos"
+  ]
+ },
+ "Polvo Zn|Exterior": {
+  "venta": [
+   "7011160",
+   "Mercaderías - Mercaderías - venta de exportación - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6911160",
+   "Mercaderías - Mercaderías - exportación - Terceros-Otros Productos"
+  ]
+ },
+ "Servicios|Exterior": {
+  "venta": [
+   "7031100",
+   "Servicios terminados - Servicios – exportación - Terceros"
+  ]
+ },
+ "Bolas de acero|Local": {
+  "venta": [
+   "7012160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6912160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ]
+ },
+ "Carbon Activado|Local": {
+  "venta": [
+   "7012110",
+   "Mercaderías - Mercaderías - venta local - Terceros - Carbon Activado"
+  ],
+  "costo": [
+   "6912110",
+   "Mercaderías - Mercaderías - venta local - Terceros Carbon Activado"
+  ]
+ },
+ "CCS|Local": {
+  "venta": [
+   "7012130",
+   "Mercaderías - Mercaderías - venta local - Terceros - Crisoles de Carburo"
+  ],
+  "costo": [
+   "6912130",
+   "Mercaderías - Mercaderías - venta local - Terceros Crisoles de Carburo"
+  ]
+ },
+ "Copelas|Local": {
+  "venta": [
+   "7012140",
+   "Mercaderías - Mercaderías - venta local - Terceros - Copelas"
+  ],
+  "costo": [
+   "6912140",
+   "Mercaderías - Mercaderías - venta local - Terceros Copelas"
+  ]
+ },
+ "Crisoles de Arcilla|Local": {
+  "venta": [
+   "7022110",
+   "Productos terminados - Productos terminados - Venta local - Terceros - Crisoles de Arcilla"
+  ],
+  "costo": [
+   "6922110",
+   "Productos terminados - Productos terminados - Venta local - Terceros - Crisoles de Arcilla"
+  ]
+ },
+ "Equipos|Local": {
+  "venta": [
+   "7012170",
+   "Mercaderías - Mercaderías - venta local - Terceros - Equipos Diversos"
+  ],
+  "costo": [
+   "6912170",
+   "Mercaderías - Mercaderías - venta local - Terceros - Equipos"
+  ]
+ },
+ "Floculantes|Local": {
+  "venta": [
+   "7012160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6912160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ]
+ },
+ "Fundente|Local": {
+  "venta": [
+   "7022120",
+   "Productos terminados - Productos terminados - Venta local - Terceros - Fundente"
+  ],
+  "costo": [
+   "6922120",
+   "Productos terminados - Productos terminados - Venta local - Terceros - Fundente"
+  ]
+ },
+ "Insumos|Local": {
+  "venta": [
+   "7012160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6912160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ]
+ },
+ "Polvo Zn|Local": {
+  "venta": [
+   "7012160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ],
+  "costo": [
+   "6912160",
+   "Mercaderías - Mercaderías - venta local - Terceros - Otros Productos"
+  ]
+ },
+ "Servicios|Local": {
+  "venta": [
+   "7032100",
+   "Servicios terminados - Servicios – local - Terceros"
+  ]
+ }
+}

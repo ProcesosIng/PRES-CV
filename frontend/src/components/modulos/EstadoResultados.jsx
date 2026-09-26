@@ -171,7 +171,7 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
       </div>
       <div style={{ fontSize: '10px', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
         Mismas fórmulas que el Power BI (saldo = debe − haber): Ventas ABS(70) · Dscto 74 · Costo 69 · Gastos 9x62–9x65 (98 Log., 99 Alm., 95 Com., 94 Adm.) · Depre 9x68 · Otros Ing ABS(75, 775, 7611) · IngFinan ABS(7792) · GastFinan 976711/97673/976793 · DifCamb −(776, 97676) · Participación e IR = tasa × utilidad.
-        {' '}<b>Proyectado:</b> ventas y costo del Forecast (costo unitario del costeo del producto) + gastos registrados en el sistema. <b>Ejecutado:</b> asientos publicados en Odoo.
+        {' '}<b>Proyectado:</b> ventas (cuentas 70x) y costo de ventas (69x) del Forecast: precio y costo unitario del vendedor × cantidad esperada + gastos registrados en el sistema. <b>Ejecutado:</b> asientos publicados en Odoo.
         {' '}Variación = Ejecutado − Proyectado; verde = favorable (más ingreso/utilidad o menos costo/gasto).
       </div>
     </div>

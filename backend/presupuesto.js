@@ -165,7 +165,8 @@ async function guardarForecastMensual(cx, r, cab) {
     const costo = esperada * costoU;
     return [r.id_registro, r.id_version, anio, i + 1, dc.unidad_negocio || null, dc.codigo_producto || null, dc.producto || null,
       dc.presentacion_fundente || null, dc.cliente || null, dc.tipo_cliente || null, dc.vendedor || null, dc.zona || null, dc.pais || null,
-      dc.um || null, moneda, tc, cantidad, prob, esperada, precio, costoU, ingreso, costo, ingreso - costo, ingreso * tc, costo * tc, (ingreso - costo) * tc];
+      dc.um || null, moneda, tc, cantidad, prob, esperada, precio, costoU, ingreso, costo, ingreso - costo, ingreso * tc, costo * tc, (ingreso - costo) * tc,
+      dc.tipo_negocio || null, dc.cuenta_venta || null, dc.cuenta_costo || null];
   }).filter(f => f[16] !== 0);
   if (filas.length === 0) return;
 
@@ -174,7 +175,7 @@ async function guardarForecastMensual(cx, r, cab) {
   await cx.query(
     `INSERT INTO ppto_forecast_mensual (id_registro, id_version, anio, mes, unidad_negocio, codigo_producto, producto, presentacion, cliente, tipo_cliente,
        vendedor, zona, pais, um, moneda, tipo_cambio, cantidad, probabilidad, cantidad_esperada, precio_venta, costo_unitario, ingreso, costo, margen,
-       ingreso_soles, costo_soles, margen_soles)
+       ingreso_soles, costo_soles, margen_soles, tipo_negocio, cuenta_venta, cuenta_costo)
      VALUES ${valores.join(',')}`,
     filas.flat()
   );

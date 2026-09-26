@@ -31,8 +31,8 @@
 //
 // PROYECTADO: se arma con los mismos saldos a partir de lo registrado en el sistema:
 //   - Ventas: Forecast (cantidad esperada × precio, US$ a soles) como saldo acreedor de la 70.
-//   - Costo de ventas: cantidad esperada × costo unitario del COSTEO del producto (incluye
-//     embalaje, porque las cuentas 61 no entran en gastos); si no hay costeo, el del forecast.
+//   - Costo de ventas: cantidad esperada × costo unitario que coloca el vendedor en el forecast
+//     (cuenta 69x según línea de negocio y zona).
 //   - Gastos: registros de gasto por cuenta destino (mismas reglas que el ejecutado).
 // =====================================================================
 
@@ -103,23 +103,14 @@ export function calcularProyectado(registros, { idVersion, anio }) {
   const base = vacioMeses();
   const deVersion = registros.filter(r => (!idVersion || r.id_version === idVersion));
 
-  // Costo unitario por producto desde los costeos (con embalaje: las cuentas 61 no están en gastos)
-  const costoCosteo = {};
-  deVersion.filter(r => esCosteo(r.modulo) && r.modulo !== 'Costeo de Embalajes' && anioDe(r) === anio).forEach(r => {
-    const dc = r.detalle_columnas || {};
-    const prod = String(dc.producto || '').trim().toLowerCase();
-    const unit = num(dc.costo_unitario_promedio);
-    if (prod && unit > 0) costoCosteo[prod] = unit;
-  });
-
   deVersion.forEach(r => {
     const dc = r.detalle_columnas || {};
     if (esForecast(r.modulo)) {
       if (anioDe(r) !== anio) return;
       const tc = dc.moneda === 'US$' ? (num(dc.tipo_cambio) || 1) : 1;
       const precio = num(dc.precio_venta) * tc;
-      const unitCosteo = costoCosteo[String(dc.producto || '').trim().toLowerCase()];
-      const costoUnit = unitCosteo != null ? unitCosteo : num(dc.costo_unitario) * tc;
+      // Costo de venta = costo unitario que coloca el vendedor x cantidad (cuentas 69x).
+      const costoUnit = num(dc.costo_unitario) * tc;
       MESES_EERR.forEach((m, i) => {
         const cant = num(dc.cantidades?.[m]);
         if (!cant) return;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { UNIDADES_NEGOCIO, TIPOS_CLIENTE, TIPOS_ZONA, MESES } from '../../config/data';
+import { cuentasForecast, tipoNegocioDe } from '../../config/cuentasForecast';
 import { obtenerClientesOdoo, obtenerProductosOdoo, obtenerEmpleadosOdoo, obtenerUnidadesMedida, obtenerHistorialProducto, obtenerTipoCambioPromedio } from '../../data/store';
 
 const ANIO_ACTUAL = new Date().getFullYear();
@@ -36,7 +37,8 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
   const [pv2025Display, setPv2025Display] = useState('0.00');
   const [cv2025Display, setCv2025Display] = useState('0.00');
 
-  const [moneda, setMoneda] = useState('S/');
+  // Los precios del forecast se trabajan en dólares.
+  const [moneda, setMoneda] = useState('US$');
   const [tipoCambio, setTipoCambio] = useState('3.75');
 
   const [tipoProbabilidad, setTipoProbabilidad] = useState('general');
@@ -160,7 +162,7 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
       setPrecioVentaDisplay((parseFloat(dc.precio_venta) || 0).toFixed(2));
       setCostoUnitarioDisplay((parseFloat(dc.costo_unitario) || 0).toFixed(2));
 
-      setMoneda(dc.moneda || 'S/');
+      setMoneda(dc.moneda || 'US$');
       if (dc.tipo_cambio) setTipoCambio(dc.tipo_cambio.toString());
 
       if (dc.tipo_probabilidad) setTipoProbabilidad(dc.tipo_probabilidad);
@@ -227,6 +229,10 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
     ? ((margenBruto / ingresoTotalProyectado) * 100)
     : 0;
 
+  // Cuenta de venta (70x) y de costo (69x) según la unidad de negocio y la zona.
+  const cuentas = cuentasForecast(unidadNegocio, zona);
+  const tipoNegocio = tipoNegocioDe(unidadNegocio);
+
   const handleGuardar = () => {
     if (!cliente) return alert('Por favor, seleccione un cliente.');
     if (!producto) return alert('Por favor, seleccione un producto.');
@@ -268,6 +274,9 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
         ingreso_total: ingresoTotalProyectado,
         costo_total: costoTotalProyectado,
         margen_bruto: margenBruto,
+        tipo_negocio: tipoNegocio,
+        cuenta_venta: cuentas.venta?.texto || null,
+        cuenta_costo: cuentas.costo?.texto || null,
         presentacion_fundente: unidadNegocio === 'Fundente' ? presentacionFundente : null,
         unidad_sachet: unidadNegocio === 'Fundente' && presentacionFundente === 'Sachet' ? unidadSachet : null,
       },
@@ -276,17 +285,18 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
         costo_total: costoTotalProyectado,
         margen_bruto: margenBruto
       },
+      // Montos en soles, en la cuenta 70x de venta y 69x de costo que corresponde a la línea y zona.
       desglose_contable: [
         {
           id: 'v1',
-          cuenta: `Ventas Proyectadas (${moneda}) · ${unidadNegocio} · ${producto}`,
-          monto: ingresoTotalProyectado.toFixed(2)
+          cuenta: cuentas.venta?.texto || `Ventas sin cuenta asignada · ${unidadNegocio} · ${zona}`,
+          monto: (ingresoTotalProyectado * (moneda === 'US$' ? parseFloat(tipoCambio) || 1 : 1)).toFixed(2)
         },
-        {
+        ...(cuentas.costo ? [{
           id: 'c1',
-          cuenta: `Costo de Ventas (${moneda}) · ${unidadNegocio} · ${producto}`,
-          monto: costoTotalProyectado.toFixed(2)
-        }
+          cuenta: cuentas.costo.texto,
+          monto: (costoTotalProyectado * (moneda === 'US$' ? parseFloat(tipoCambio) || 1 : 1)).toFixed(2)
+        }] : [])
       ],
     };
 
@@ -697,6 +707,16 @@ export default function ForecastComercialForm({ registro, onGuardar, onCancelar,
                   obligatorio: false,
                 })}
               </div>
+            </div>
+
+            {/* Cuentas contables que tomará el EERR: dependen de la unidad de negocio y la zona */}
+            <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', alignItems: 'baseline' }}>
+              <span style={{ fontWeight: 700, color: '#64748b' }}>TIPO DE NEGOCIO</span>
+              <span><b style={{ color: tipoNegocio === 'Fire Assay' ? '#b45309' : '#0369a1' }}>{tipoNegocio}</b></span>
+              <span style={{ fontWeight: 700, color: '#64748b' }}>CUENTA VENTA</span>
+              <span style={{ color: cuentas.venta ? '#0f172a' : '#b91c1c' }}>{cuentas.venta?.texto || `Sin cuenta para ${unidadNegocio || '-'} · ${zona || '-'}`}</span>
+              <span style={{ fontWeight: 700, color: '#64748b' }}>CUENTA COSTO</span>
+              <span style={{ color: cuentas.costo ? '#0f172a' : '#94a3b8' }}>{cuentas.costo?.texto || (unidadNegocio === 'Servicios' ? 'Servicios: solo venta' : `Sin cuenta para ${unidadNegocio || '-'} · ${zona || '-'}`)}</span>
             </div>
 
             {/* 🌟 BLOQUE CONDICIONAL PARA FUNDENTES (GRANEL / SACHET Y PESO) */}
