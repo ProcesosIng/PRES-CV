@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import ReporteGantt, { MESES_CORTOS, mesesVacios, totalMontoGrupos } from './ReporteGantt';
 import EstadoResultados from './EstadoResultados';
 import GastosProyVsEjec from './GastosProyVsEjec';
 import { listarVersiones } from '../../data/store';
+import { exportarExcel, exportarTablasHtml } from '../../config/excel';
 
 // El Forecast (ventas) y los Costeos (formularios de apoyo que calculan el costo de cada
 // producto) NO son gastos: se ven en sus propias pestañas, no en el consolidado ni en gastos.
@@ -12,8 +13,12 @@ const esForecastOCosteo = (modulo) => {
 };
 const PESTANAS_SOLO_GASTOS = ['general', 'gastos_areas'];
 
-export default function ReporteGeneral({ registrosTotales = [] }) {
+export default function ReporteGeneral({ registrosTotales = [], usuario = null }) {
   const [tipoReporte, setTipoReporte] = useState('general');
+  // El EERR es de toda la empresa: solo lo ven los administradores.
+  const verEERR = !usuario || usuario.esAdmin;
+  const [exportando, setExportando] = useState(false);
+  const refContenido = useRef(null);
   const [modoAgrupacionGeneral, setModoAgrupacionGeneral] = useState('detallado');
   
   const [filtroVersion, setFiltroVersion] = useState('');
@@ -525,77 +530,120 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
     setFechaHasta('');
   };
 
-  const exportarAExcel = () => {
-    let headers = [];
-    let filas = [];
-    let nombreReporte = tipoReporte;
+  const NOMBRES_REPORTE = {
+    general: 'Reporte General Consolidado', forecast: 'Forecast de Ventas', gastos_areas: 'Gastos por Áreas', compras: 'Plan de Compras',
+    produccion: 'Plan de Producción', gastos_pve: 'Gastos Proyectado vs Ejecutado', eerr: 'Estado de Resultados',
+  };
 
-    const ganttActual = { forecast: ganttForecast, compras: ganttCompras, produccion: ganttProduccion }[tipoReporte];
-    if (ganttActual) {
-      if (ganttActual.length === 0) {
-        alert('No hay datos para exportar con los filtros seleccionados.');
+  // Filtros activos, para dejarlos anotados en el Excel.
+  const describirFiltros = () => [
+    filtroVersion && `Versión: ${filtroVersion.toUpperCase()}`, filtroArea && `Área: ${filtroArea}`, filtroModulo && `Módulo: ${filtroModulo}`,
+    ['forecast', 'compras', 'produccion'].includes(tipoReporte) && anioActivoGantt && `Año: ${anioActivoGantt}`,
+    centroProduccion && `Centro: ${centroProduccion}`, filtroUnidadNegocio && `Unidad de negocio: ${filtroUnidadNegocio}`,
+    filtroCliente && `Cliente: ${filtroCliente}`, filtroVendedor && `Vendedor: ${filtroVendedor}`, filtroMoneda && `Moneda: ${filtroMoneda}`,
+    filtroPersona && `Búsqueda: ${filtroPersona}`, fechaDesde && `Desde: ${fechaDesde}`, fechaHasta && `Hasta: ${fechaHasta}`,
+  ].filter(Boolean).join(' · ') || 'Sin filtros';
+
+  const montoDe = (reg) => {
+    const dc = reg.detalle_columnas || {};
+    return reg.modulo === 'Forecast de Ventas' ? parseFloat(reg.totales?.ingreso_total || dc.ingreso_total || 0) : parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
+  };
+
+  // Exporta a .xlsx lo que se ve en la pestaña, con los filtros aplicados.
+  const exportarAExcel = async () => {
+    const titulo = NOMBRES_REPORTE[tipoReporte] || 'Reporte';
+    const subtitulo = describirFiltros();
+    const archivo = `${titulo} ${new Date().toISOString().slice(0, 10)}`;
+    try {
+      setExportando(true);
+      // EERR y Gastos Proy. vs Ejec.: se exportan las tablas tal como se ven, con todos los niveles abiertos.
+      if (tipoReporte === 'eerr' || tipoReporte === 'gastos_pve') {
+        await new Promise(r => setTimeout(r, 60)); // deja que se rendericen los niveles desplegados
+        await exportarTablasHtml({ contenedor: refContenido.current, nombreArchivo: archivo, titulo, subtitulo });
         return;
       }
-      headers = ['Grupo', 'Detalle', 'Información', ...MESES_CORTOS.flatMap(m => [`${m} Cant.`, `${m} S/`]), 'Total Cant.', 'Total S/'];
-      ganttActual.forEach(g => g.filas.forEach(f => {
-        const totCant = f.meses.reduce((a, m) => a + m.cantidad, 0);
-        const totMonto = f.meses.reduce((a, m) => a + m.monto, 0);
-        filas.push([
-          `"${g.titulo}"`, `"${f.titulo}"`, `"${f.subtitulo || ''}"`,
-          ...f.meses.flatMap(m => [m.cantidad.toFixed(2), m.monto.toFixed(2)]),
-          totCant.toFixed(2), totMonto.toFixed(2)
-        ].join(';'));
-      }));
-      nombreReporte = `${tipoReporte}_${anioActivoGantt}`;
-    }
-    else if (tipoReporte === 'gastos_areas') {
-      if (resumenGastosAreas.length === 0) {
-        alert('No hay registros de Gastos por Áreas para exportar.');
+
+      const ganttActual = { forecast: ganttForecast, compras: ganttCompras, produccion: ganttProduccion }[tipoReporte];
+      if (ganttActual) {
+        if (ganttActual.length === 0) throw new Error('No hay datos para exportar con los filtros seleccionados.');
+        const filas = [];
+        ganttActual.forEach(g => g.filas.forEach(f => filas.push({ grupo: g.titulo, detalle: f.titulo, info: f.subtitulo || '', meses: f.meses })));
+        const etiquetaCant = { forecast: 'Cant.', compras: 'Cant.', produccion: 'Cant.' }[tipoReporte];
+        await exportarExcel(archivo, [{
+          nombre: titulo, titulo: `${titulo} ${anioActivoGantt || ''}`, subtitulo,
+          columnas: [
+            { titulo: 'Grupo', clave: 'grupo', ancho: 26 }, { titulo: 'Detalle', clave: 'detalle', ancho: 40 }, { titulo: 'Información', clave: 'info', ancho: 30 },
+            ...MESES_CORTOS.flatMap((m, i) => [
+              { titulo: `${m} ${etiquetaCant}`, valor: f => f.meses[i]?.cantidad || 0, formato: 'numero', ancho: 11 },
+              { titulo: `${m} S/`, valor: f => f.meses[i]?.monto || 0, formato: 'moneda', ancho: 13 },
+            ]),
+            { titulo: `Total ${etiquetaCant}`, valor: f => f.meses.reduce((a, m) => a + m.cantidad, 0), formato: 'numero', ancho: 13 },
+            { titulo: 'Total S/', valor: f => f.meses.reduce((a, m) => a + m.monto, 0), formato: 'moneda', ancho: 15 },
+          ],
+          filas,
+        }]);
         return;
       }
-      headers = ['Área Organizacional', 'Módulo', 'Costo / Gasto Total (S/)'];
-      resumenGastosAreas.forEach(item => {
-        item.modulos.forEach(mod => {
-          filas.push([
-            `"${item.area}"`,
-            `"${mod.modulo}"`,
-            mod.monto.toFixed(2)
-          ].join(';'));
+
+      if (tipoReporte === 'gastos_areas') {
+        if (resumenGastosAreas.length === 0) throw new Error('No hay registros de Gastos por Áreas para exportar.');
+        const filas = resumenGastosAreas.flatMap(item => item.modulos.map(mod => ({ area: item.area, modulo: mod.modulo, monto: mod.monto })));
+        await exportarExcel(archivo, [{
+          nombre: 'Gastos por áreas', titulo, subtitulo,
+          columnas: [{ titulo: 'Área', clave: 'area', ancho: 26 }, { titulo: 'Módulo', clave: 'modulo', ancho: 32 }, { titulo: 'Costo / Gasto total (S/)', clave: 'monto', formato: 'moneda', ancho: 22 }],
+          filas,
+        }]);
+        return;
+      }
+
+      if (registrosFiltrados.length === 0) throw new Error('No hay registros para exportar con los filtros actuales.');
+      const registros = registrosFiltrados.map(reg => {
+        const dc = reg.detalle_columnas || {};
+        return {
+          version: (reg.id_version || '').toUpperCase(), fecha: reg.fecha_proyeccion || '', area: reg.area || dc.area || '', modulo: reg.modulo || '',
+          concepto: reg.empleado_nombre || dc.descripcion_activo || dc.descripcion_cuenta || dc.detalle || '',
+          cuenta: dc.cuenta_afectada || dc.numero_cuenta || (Array.isArray(reg.desglose_contable) && reg.desglose_contable[0]?.cuenta) || '',
+          monto: montoDe(reg), creado_por: reg.creado_por || '', actualizado_por: reg.actualizado_por || '', actualizado_en: reg.actualizado_en || null,
+        };
+      });
+      // Una fila por cuenta contable del registro (para tablas dinámicas en Excel).
+      const lineas = registrosFiltrados.flatMap(reg => {
+        const dc = reg.detalle_columnas || {};
+        const base = { version: (reg.id_version || '').toUpperCase(), fecha: reg.fecha_proyeccion || '', area: reg.area || '', modulo: reg.modulo || '', concepto: reg.empleado_nombre || dc.detalle || '' };
+        const desglose = Array.isArray(reg.desglose_contable) ? reg.desglose_contable.filter(d => d && (d.cuenta || d.monto)) : [];
+        const lista = desglose.length ? desglose.map(d => ({ cuenta: d.cuenta, monto: parseFloat(d.monto) || 0 })) : [{ cuenta: dc.cuenta_afectada || dc.numero_cuenta || '', monto: montoDe(reg) }];
+        return lista.map(l => {
+          const texto = String(l.cuenta || '');
+          const i = texto.indexOf(' - ');
+          return { ...base, codigo: i > 0 ? texto.slice(0, i) : texto, nombre_cuenta: i > 0 ? texto.slice(i + 3) : '', monto: l.monto };
         });
       });
-    } 
-    else {
-      if (registrosFiltrados.length === 0) {
-        alert('No hay registros para exportar con los filtros actuales.');
-        return;
-      }
-      headers = ['Versión', 'Fecha Aplicación', 'Módulo', 'Área', 'Cuenta Contable', 'Concepto / Empleado', 'Total (S/)'];
-      filas = registrosFiltrados.map(reg => {
-        const dc = reg.detalle_columnas || {};
-        const cuenta = dc.cuenta_afectada || dc.numero_cuenta || (Array.isArray(reg.desglose_contable) && reg.desglose_contable.length > 0 ? reg.desglose_contable[0].cuenta : null) || 'S/C';
-        let monto = reg.modulo === 'Forecast de Ventas' ? parseFloat(reg.totales?.ingreso_total || dc.ingreso_total || 0) : parseFloat(reg.totales?.costo_total || dc.costo_total || 0);
-        const concepto = (reg.empleado_nombre || dc.descripcion_activo || dc.descripcion_cuenta || 'N/A').replace(/"/g, '""');
-        return [
-          reg.id_version ? reg.id_version.toUpperCase() : 'N/A', 
-          reg.fecha_proyeccion || 'N/A', 
-          reg.modulo || 'General', 
-          reg.area || dc.area || 'N/A', 
-          `"${cuenta}"`, 
-          `"${concepto}"`, 
-          monto.toFixed(2)
-        ].join(';');
-      });
+      await exportarExcel(archivo, [
+        {
+          nombre: 'Registros', titulo, subtitulo,
+          columnas: [
+            { titulo: 'Versión', clave: 'version' }, { titulo: 'Fecha', clave: 'fecha', ancho: 12 }, { titulo: 'Área', clave: 'area', ancho: 22 },
+            { titulo: 'Módulo', clave: 'modulo', ancho: 26 }, { titulo: 'Concepto / Empleado', clave: 'concepto', ancho: 36 }, { titulo: 'Cuenta contable', clave: 'cuenta', ancho: 44 },
+            { titulo: 'Total (S/)', clave: 'monto', formato: 'moneda', ancho: 15 }, { titulo: 'Creado por', clave: 'creado_por', ancho: 28 },
+            { titulo: 'Modificado por', clave: 'actualizado_por', ancho: 28 }, { titulo: 'Modificado el', clave: 'actualizado_en', formato: 'fechahora', ancho: 18 },
+          ],
+          filas: registros,
+        },
+        {
+          nombre: 'Líneas contables', titulo: `${titulo} - por cuenta contable`, subtitulo,
+          columnas: [
+            { titulo: 'Versión', clave: 'version' }, { titulo: 'Fecha', clave: 'fecha', ancho: 12 }, { titulo: 'Área', clave: 'area', ancho: 22 }, { titulo: 'Módulo', clave: 'modulo', ancho: 26 },
+            { titulo: 'Concepto', clave: 'concepto', ancho: 36 }, { titulo: 'Código', clave: 'codigo', ancho: 12 }, { titulo: 'Cuenta', clave: 'nombre_cuenta', ancho: 40 },
+            { titulo: 'Monto (S/)', clave: 'monto', formato: 'moneda', ancho: 15 },
+          ],
+          filas: lineas,
+        },
+      ]);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setExportando(false);
     }
-
-    const contenidoCSV = [headers.join(';'), ...filas].join('\n');
-    const blob = new Blob(["\ufeff" + contenidoCSV], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Reporte_${nombreReporte}_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
@@ -608,11 +656,9 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
         </div>
         
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {!['eerr', 'gastos_pve'].includes(tipoReporte) && (
-          <button onClick={exportarAExcel} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
-            📥 Descargar CSV / Excel
+          <button onClick={exportarAExcel} disabled={exportando} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: exportando ? 'wait' : 'pointer' }}>
+            {exportando ? 'Generando Excel...' : '📥 Exportar a Excel'}
           </button>
-          )}
           
           {!['eerr', 'gastos_pve'].includes(tipoReporte) && (
           <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
@@ -636,7 +682,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           { id: 'produccion', label: '⚙️ Plan de Producción' },
           { id: 'gastos_pve', label: '💸 Gastos: Proyectado vs Ejecutado' },
           { id: 'eerr', label: '📊 Estado de Resultados' }
-        ].map(tab => (
+        ].filter(tab => tab.id !== 'eerr' || verEERR).map(tab => (
           <button
             key={tab.id}
             onClick={() => setTipoReporte(tab.id)}
@@ -941,13 +987,15 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       )}
 
       {/* 5. REPORTE GENERAL CONSOLIDADO (CON VISTA AGRUPADA Y DETALLADA) */}
+      <div ref={refContenido}>
       {tipoReporte === 'gastos_pve' && (
-        <GastosProyVsEjec registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
+        <GastosProyVsEjec registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} expandirTodo={exportando} />
       )}
 
-      {tipoReporte === 'eerr' && (
+      {tipoReporte === 'eerr' && verEERR && (
         <EstadoResultados registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
       )}
+      </div>
 
       {tipoReporte === 'general' && (
         <div style={{ background: 'white', borderRadius: '8px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>

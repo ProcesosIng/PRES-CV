@@ -1,5 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { API_URL } from '../../config/api';
+import { exportarTablasHtml } from '../../config/excel';
+
+// Atributos para Excel: el valor exacto de la celda (en pantalla se ve abreviado).
+const xl = (v, formato = 'moneda') => (v === null || v === undefined || !Number.isFinite(v) ? {} : { 'data-valor': v, 'data-formato': formato });
 import { LINEAS_EERR, MESES_EERR, calcularProyectado, calcularEjecutado, lineasPeriodo } from '../../config/eerr';
 
 // Estado de Resultados: PROYECTADO (lo registrado en el sistema) vs EJECUTADO (asientos de Odoo).
@@ -84,34 +88,24 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
     const td = { padding: '4px 8px', textAlign: 'right', whiteSpace: 'nowrap', borderBottom: '1px solid #e2e8f0', fontSize: '11px' };
     return (
       <React.Fragment key={`${linea.id}-${i}`}>
-        <td style={{ ...td, background: '#f3e39b' }}>{fmt(p)}</td>
-        <td style={{ ...td, background: '#e5e7eb' }}>{e === null ? '' : fmt(e)}</td>
-        <td style={{ ...td, background: bueno === null || Math.abs(variacion) < 0.005 ? 'white' : (bueno ? '#4ade80' : '#f87171'), fontWeight: 700 }}>
+        <td {...xl(p, esPct ? 'pct' : 'moneda')} style={{ ...td, background: '#f3e39b' }}>{fmt(p)}</td>
+        <td {...xl(e, esPct ? 'pct' : 'moneda')} style={{ ...td, background: '#e5e7eb' }}>{e === null ? '' : fmt(e)}</td>
+        <td {...xl(esPct ? null : variacion)} style={{ ...td, background: bueno === null || Math.abs(variacion) < 0.005 ? 'white' : (bueno ? '#4ade80' : '#f87171'), fontWeight: 700 }}>
           {variacion === null ? '' : (esPct ? `${(variacion * 100).toFixed(1)} pp` : miles(variacion))}
         </td>
-        <td style={{ ...td, background: bueno === null || varPct === null ? 'white' : (bueno ? '#86efac' : '#fca5a5') }}>{varPct === null ? '' : `${(varPct * 100).toFixed(2)} %`}</td>
+        <td {...xl(varPct, 'pct')} style={{ ...td, background: bueno === null || varPct === null ? 'white' : (bueno ? '#86efac' : '#fca5a5') }}>{varPct === null ? '' : `${(varPct * 100).toFixed(2)} %`}</td>
       </React.Fragment>
     );
   };
 
-  const exportar = () => {
-    const grupos = [...columnas.map(c => ({ etiqueta: c.etiqueta, i: c.i })), { etiqueta: `Total ${anio}`, i: 'total' }];
-    const headers = ['Línea', ...grupos.flatMap(g => [`${g.etiqueta} Proyectado`, `${g.etiqueta} Ejecutado`, `${g.etiqueta} Variación`])];
-    const filas = LINEAS_EERR.map(l => [
-      `"${l.id}. ${l.nombre}"`,
-      ...grupos.flatMap(g => {
-        const p = valor('proy', l.clave, g.i);
-        const e = estadoEjec === 'ok' ? valor('ejec', l.clave, g.i) : null;
-        const f = (v) => (v === null || v === undefined ? '' : v.toFixed(4));
-        return [f(p), f(e), e === null || p === null ? '' : f(e - p)];
-      })
-    ].join(';'));
-    const blob = new Blob(['﻿' + [headers.join(';'), ...filas].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `EERR_${idVersion}_${anio}.csv`;
-    a.click();
-  };
+  // Exporta la tabla tal como se ve (valores exactos vía data-valor) a .xlsx.
+  const refTabla = useRef(null);
+  const exportar = () => exportarTablasHtml({
+    contenedor: refTabla.current,
+    nombreArchivo: `EERR ${idVersion} ${anio}`,
+    titulo: `Estado de Resultados ${anio} - Proyectado vs Ejecutado`,
+    subtitulo: `Versión ${String(idVersion).toUpperCase()} · Participación ${tasaPart}% · IR ${tasaIR}%`,
+  }).catch(e => alert(e.message));
 
   const control = { padding: '6px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px' };
   const label = { fontSize: '10px', fontWeight: 600, color: '#64748b', display: 'block' };
@@ -139,12 +133,12 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
           <span style={{ fontSize: '11px', fontWeight: 600, color: estadoEjec === 'ok' ? '#15803d' : estadoEjec === 'error' ? '#b91c1c' : '#64748b' }}>
             {estadoEjec === 'ok' ? '● Ejecutado cargado desde Odoo' : estadoEjec === 'error' ? '● No se pudo leer el ejecutado de Odoo' : '● Cargando ejecutado...'}
           </span>
-          <button type="button" onClick={exportar} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>📥 CSV</button>
+          <button type="button" onClick={exportar} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>📥 Excel</button>
         </div>
       </div>
 
-      <div style={{ overflow: 'auto', maxHeight: '72vh', border: '2px solid #1e3a8a', borderRadius: '8px', background: 'white' }}>
-        <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px', minWidth: '100%' }}>
+      <div ref={refTabla} style={{ overflow: 'auto', maxHeight: '72vh', border: '2px solid #1e3a8a', borderRadius: '8px', background: 'white' }}>
+        <table data-hoja="EERR" style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px', minWidth: '100%' }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
             <tr style={{ background: '#1e3a8a', color: 'white' }}>
               <th rowSpan={2} style={{ position: 'sticky', left: 0, zIndex: 4, background: '#1e3a8a', padding: '6px 10px', minWidth: '220px', textAlign: 'left' }}>ESTADO DE RESULTADOS {anio}</th>

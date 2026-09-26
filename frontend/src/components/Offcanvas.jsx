@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import RemuneracionesForm from './modulos/RemuneracionesForm';
 import UniformesForm from './modulos/UniformesForm';
 import PlanViajeForm from './modulos/PlanViajeForm';
@@ -12,7 +12,8 @@ import CosteoCopelasForm from './modulos/CosteoCopelasForm';
 import CosteoEmbalajesForm from './modulos/CosteoEmbalajesForm';
 import BaseRegistroForm from './common/BaseRegistroForm';
 import { MODULOS_CONFIG } from '../config/modulosConfig';
-import { guardarRegistro } from '../data/store';
+import { guardarRegistro, obtenerVersion } from '../data/store';
+import { imprimirElemento } from '../config/impresion';
 
 // Antes: recibía `registrosActuales` + `setRegistros` y hacía el merge de
 // listas a mano (filtrar el registro editado y volver a insertar). Ahora
@@ -24,12 +25,30 @@ import { guardarRegistro } from '../data/store';
 const MODULOS_QUE_GUARDAN_SOLOS = ['Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas', 'Costeo de Embalajes'];
 
 export default function Offcanvas(props) {
-  const { isOpen, onClose, categoria, idVersion, area, registroParaVer, modo, onGuardado } = props;
+  const { isOpen, onClose, categoria, idVersion, area, registroParaVer, modo, onGuardado, usuario } = props;
+  const refFormulario = useRef(null);
 
   const modulosComoVentana = ['Remuneraciones', 'Forecast de Ventas', 'Costeo de Crisoles', 'Costeo de Fundente', 'Costeo de Copelas', 'Costeo de Embalajes', 'Plan de Mantenimiento', 'Plan de Viaje', 'Utiles de Oficina', 'Plan de Depreciación'  ];
   const esVentana = modulosComoVentana.includes(categoria);
 
   if (!isOpen) return null;
+
+  // Imprime (o guarda en PDF) el formulario tal como está, con los datos escritos.
+  const imprimir = () => {
+    const version = obtenerVersion(idVersion);
+    const reg = registroParaVer;
+    imprimirElemento(refFormulario.current, {
+      titulo: categoria,
+      lineas: [
+        `Área: ${area || '-'}`,
+        `Versión: ${String(idVersion || '').toUpperCase()}${version?.nombre ? ` - ${version.nombre}` : ''}`,
+        reg?.id_registro && `Registro: ${reg.id_registro}`,
+        reg?.creado_por && `Creado por ${reg.creado_por}${reg.creado_en ? ` el ${new Date(reg.creado_en).toLocaleString('es-PE')}` : ''}`,
+        reg?.actualizado_por && reg.actualizado_por !== reg.creado_por && `Modificado por ${reg.actualizado_por}`,
+        `Impreso por ${usuario?.nombre || usuario?.email || '-'} el ${new Date().toLocaleString('es-PE')}`,
+      ],
+    });
+  };
 
   const handleGuardar = (datosNuevos) => {
     const listaOriginal = Array.isArray(datosNuevos) ? datosNuevos : [datosNuevos];
@@ -264,16 +283,26 @@ export default function Offcanvas(props) {
             </div>
             <h3 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>{categoria}</h3>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: 'transparent', border: 'none', fontSize: '28px', color: '#94a3b8', cursor: 'pointer', lineHeight: 1 }}
-          >
-            &times;
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={imprimir}
+              title="Imprimir o guardar en PDF este formulario"
+              style={{ background: 'white', border: '1px solid #cbd5e1', color: '#334155', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              🖨️ Imprimir
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: 'transparent', border: 'none', fontSize: '28px', color: '#94a3b8', cursor: 'pointer', lineHeight: 1 }}
+            >
+              &times;
+            </button>
+          </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+        <div ref={refFormulario} style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
           {renderFormulario()}
         </div>
       </div>

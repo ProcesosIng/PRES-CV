@@ -39,15 +39,20 @@ function construirArbol(movs, niveles) {
   return raiz;
 }
 
+// Atributos para la exportación a Excel (valor exacto, sin abreviar).
+const num = (v, formato = 'moneda') => (v === null || v === undefined || !Number.isFinite(v) || Math.abs(v) < 0.005 && formato !== 'pct' ? {} : { 'data-valor': v, 'data-formato': formato });
+
 const valoresDe = (nodo, meses) => meses.reduce((acc, i) => {
   const v = nodo.meses[i];
   if (v) { acc.p += v.p; acc.e += v.e; }
   return acc;
 }, { p: 0, e: 0 });
 
-function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto = 1 }) {
+// expandirTodo: al exportar a Excel se abren todos los niveles para que salgan completos.
+// data-valor / data-formato llevan el número exacto a Excel (en pantalla se muestra abreviado en "mil").
+function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto = 1, expandirTodo = false }) {
   const [abiertos, setAbiertos] = useState({});
-  const estaAbierto = (n) => (abiertos[n.clave] ?? n.nivel < abiertoPorDefecto);
+  const estaAbierto = (n) => expandirTodo || (abiertos[n.clave] ?? n.nivel < abiertoPorDefecto);
   const grupos = [...mesesVisibles.map(i => ({ etiqueta: MESES[i], meses: [i] })), { etiqueta: 'Total', meses: mesesVisibles }];
   const th = { padding: '5px 8px', fontSize: '10px', whiteSpace: 'nowrap' };
   const td = { padding: '4px 8px', textAlign: 'right', whiteSpace: 'nowrap', fontSize: '11px', borderBottom: '1px solid #e2e8f0' };
@@ -74,12 +79,12 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
     const fw = negrita ? 800 : 500;
     return (
       <React.Fragment key={`${nodo.clave}-${g.etiqueta}`}>
-        <td style={{ ...td, background: '#f3e39b', fontWeight: fw }}>{miles(v.p)}</td>
-        {conPeso && <td style={{ ...td, background: '#fffbeb' }}>{base.p ? pct(v.p / base.p) : ''}</td>}
-        <td style={{ ...td, background: '#e5e7eb', fontWeight: fw }}>{miles(v.e)}</td>
-        {conPeso && <td style={{ ...td, background: '#f3f4f6' }}>{base.e ? pct(v.e / base.e) : ''}</td>}
-        <td style={{ ...td, fontWeight: 700, background: sinDatos ? 'white' : (bueno ? '#4ade80' : '#f87171') }}>{miles(variacion)}</td>
-        <td style={{ ...td, background: sinDatos || varPct === null ? 'white' : (bueno ? '#86efac' : '#fca5a5') }}>{pct(varPct)}</td>
+        <td {...num(v.p)} style={{ ...td, background: '#f3e39b', fontWeight: fw }}>{miles(v.p)}</td>
+        {conPeso && <td {...num(base.p ? v.p / base.p : null, 'pct')} style={{ ...td, background: '#fffbeb' }}>{base.p ? pct(v.p / base.p) : ''}</td>}
+        <td {...num(v.e)} style={{ ...td, background: '#e5e7eb', fontWeight: fw }}>{miles(v.e)}</td>
+        {conPeso && <td {...num(base.e ? v.e / base.e : null, 'pct')} style={{ ...td, background: '#f3f4f6' }}>{base.e ? pct(v.e / base.e) : ''}</td>}
+        <td {...num(variacion)} style={{ ...td, fontWeight: 700, background: sinDatos ? 'white' : (bueno ? '#4ade80' : '#f87171') }}>{miles(variacion)}</td>
+        <td {...num(varPct, 'pct')} style={{ ...td, background: sinDatos || varPct === null ? 'white' : (bueno ? '#86efac' : '#fca5a5') }}>{pct(varPct)}</td>
       </React.Fragment>
     );
   };
@@ -87,7 +92,7 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
   const colsPorGrupo = conPeso ? 6 : 4;
   return (
     <div style={{ background: 'white', border: '2px solid #1e3a8a', borderRadius: '8px', overflow: 'auto', maxHeight: '46vh', marginBottom: '14px' }}>
-      <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: '100%' }}>
+      <table data-hoja={titulo === 'SUBGRUPO' ? 'Por subgrupo' : 'Por área'} data-titulo={`Gastos proyectado vs ejecutado - ${titulo === 'SUBGRUPO' ? 'por subgrupo' : 'por área'}`} style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: '100%' }}>
         <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
           <tr style={{ background: '#1e3a8a', color: 'white' }}>
             <th rowSpan={2} style={{ ...th, fontSize: '12px', position: 'sticky', left: 0, zIndex: 4, background: '#1e3a8a', minWidth: '300px', textAlign: 'left' }}>{titulo}</th>
@@ -116,10 +121,11 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
             return (
               <tr key={nodo.clave} style={{ background: negrita ? '#eff6ff' : 'white' }}>
                 <td
+                  data-nivel={nodo.nivel}
                   onClick={() => tieneHijos && setAbiertos(p => ({ ...p, [nodo.clave]: !estaAbierto(nodo) }))}
                   style={{ position: 'sticky', left: 0, zIndex: 2, background: negrita ? '#eff6ff' : 'white', padding: '4px 8px', paddingLeft: `${8 + nodo.nivel * 16}px`, borderBottom: '1px solid #e2e8f0', fontSize: '11px', fontWeight: negrita ? 800 : nodo.nivel === 1 ? 700 : 500, cursor: tieneHijos ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
                 >
-                  {tieneHijos ? (estaAbierto(nodo) ? '⊟ ' : '⊞ ') : '   '}{nodo.etiqueta}
+                  <span data-no-excel>{tieneHijos ? (estaAbierto(nodo) ? '⊟ ' : '⊞ ') : '   '}</span>{nodo.etiqueta}
                 </td>
                 {grupos.map(g => celdas(nodo, area, g, negrita))}
               </tr>
@@ -134,12 +140,12 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
                 const bueno = variacion >= 0;
                 return (
                   <React.Fragment key={`t-${g.etiqueta}`}>
-                    <td style={{ ...td, background: '#f3e39b', fontWeight: 800, borderTop: '2px solid #1e3a8a' }}>{miles(v.p)}</td>
+                    <td {...num(v.p)} style={{ ...td, background: '#f3e39b', fontWeight: 800, borderTop: '2px solid #1e3a8a' }}>{miles(v.p)}</td>
                     {conPeso && <td style={{ ...td, background: '#fffbeb', borderTop: '2px solid #1e3a8a', fontWeight: 700 }}>{v.p ? '100.0 %' : ''}</td>}
-                    <td style={{ ...td, background: '#e5e7eb', fontWeight: 800, borderTop: '2px solid #1e3a8a' }}>{miles(v.e)}</td>
+                    <td {...num(v.e)} style={{ ...td, background: '#e5e7eb', fontWeight: 800, borderTop: '2px solid #1e3a8a' }}>{miles(v.e)}</td>
                     {conPeso && <td style={{ ...td, background: '#f3f4f6', borderTop: '2px solid #1e3a8a', fontWeight: 700 }}>{v.e ? '100.0 %' : ''}</td>}
-                    <td style={{ ...td, fontWeight: 800, borderTop: '2px solid #1e3a8a', background: Math.abs(variacion) < 0.005 ? 'white' : (bueno ? '#4ade80' : '#f87171') }}>{miles(variacion)}</td>
-                    <td style={{ ...td, fontWeight: 700, borderTop: '2px solid #1e3a8a' }}>{v.p ? pct(variacion / v.p) : ''}</td>
+                    <td {...num(variacion)} style={{ ...td, fontWeight: 800, borderTop: '2px solid #1e3a8a', background: Math.abs(variacion) < 0.005 ? 'white' : (bueno ? '#4ade80' : '#f87171') }}>{miles(variacion)}</td>
+                    <td {...num(v.p ? variacion / v.p : null, 'pct')} style={{ ...td, fontWeight: 700, borderTop: '2px solid #1e3a8a' }}>{v.p ? pct(variacion / v.p) : ''}</td>
                   </React.Fragment>
                 );
               })}
@@ -151,7 +157,7 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
   );
 }
 
-export default function GastosProyVsEjec({ registrosTotales = [], versiones = [], idVersionFiltro = '' }) {
+export default function GastosProyVsEjec({ registrosTotales = [], versiones = [], idVersionFiltro = '', expandirTodo = false }) {
   const idVersion = idVersionFiltro || versiones[versiones.length - 1]?.id_version || '';
 
   const anios = useMemo(() => {
@@ -268,8 +274,8 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
         <div style={{ background: '#1e3a8a', color: 'white', borderRadius: '8px', padding: '10px 16px', fontSize: '22px', fontWeight: 900, textAlign: 'center', marginBottom: '12px', letterSpacing: '0.02em' }}>
           GASTOS - C&amp;V INTERNATIONAL · {anio}{idVersion ? ` · ${idVersion.toUpperCase()}` : ''}
         </div>
-        <TablaArbol arbol={arbolAreas} mesesVisibles={mesesSel} conPeso titulo="ÁREA GASTOS" abiertoPorDefecto={1} />
-        <TablaArbol arbol={arbolSubgrupos} mesesVisibles={mesesSel} conPeso={false} titulo="SUBGRUPO" abiertoPorDefecto={0} />
+        <TablaArbol arbol={arbolAreas} mesesVisibles={mesesSel} conPeso titulo="ÁREA GASTOS" abiertoPorDefecto={1} expandirTodo={expandirTodo} />
+        <TablaArbol arbol={arbolSubgrupos} mesesVisibles={mesesSel} conPeso={false} titulo="SUBGRUPO" abiertoPorDefecto={0} expandirTodo={expandirTodo} />
         <div style={{ fontSize: '10px', color: '#64748b', lineHeight: 1.5 }}>
           Proyectado: gastos registrados en el sistema para la versión y año. Ejecutado: asientos publicados en Odoo (cuentas de destino 9x).
           Gastos en negativo · Variación = Ejecutado − Proyectado (verde = se gastó menos) · %Var = Variación / Proyectado · %G = peso dentro del área.

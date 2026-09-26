@@ -357,4 +357,24 @@ body.modo-impresion .reporte-impresion-oculto {
   th, td { border: 1px solid #cbd5e1; padding: 4px; font-size: 9px; text-align: center; }
   th { background: #f8fafc !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   td:first-child, th:first-child { text-align: left; }
+
+  /* --- IMPRESIÓN DE FORMULARIOS (config/impresion.js): horizontal, sin scrolls, todas las filas --- */
+  .impresion-formulario { page: formulario; font-size: 10px; }
+  .impresion-formulario * {
+    overflow: visible !important; max-height: none !important; height: auto !important; min-height: 0 !important;
+    position: static !important; box-shadow: none !important; animation: none !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .impresion-formulario [style*="grid"] { break-inside: avoid; }
+  .impresion-formulario tr { break-inside: avoid; }
+  .impresion-encabezado { border-bottom: 2px solid #1e3a8a; padding-bottom: 6px; margin-bottom: 10px; }
+  .impresion-empresa { font-size: 9px; color: #64748b; letter-spacing: .08em; text-transform: uppercase; }
+  .impresion-titulo { font-size: 16px; font-weight: 800; color: #1e3a8a; }
+  .impresion-datos { font-size: 9.5px; color: #334155; margin-top: 2px; }
+  .valor-impreso { display: inline-block; min-width: 20px; font-weight: 600; color: #0f172a; }
+}
+
+@page formulario {
+  size: A4 landscape;
+  margin: 8mm;
 }

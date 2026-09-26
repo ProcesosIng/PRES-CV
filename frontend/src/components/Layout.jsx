@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export default function Layout({ 
   usuario, 
-  setUsuarioActual, 
+  onCerrarSesion, 
   setVistaActual, 
   areaSeleccionada, 
   categoriaSeleccionada,
@@ -13,8 +13,8 @@ export default function Layout({
   const [menuAbierto, setMenuAbierto] = useState(false);
 
   const cerrarSesion = () => {
-    setUsuarioActual(null);
     navegar('areas');
+    onCerrarSesion();
   };
 
   const navegar = (vista) => {
@@ -56,32 +56,43 @@ export default function Layout({
           <div className="nav-item" onClick={() => navegar('areas')}>
             <span className="nav-icon">🏢</span> Áreas de Presupuesto
           </div>
-          <div className="nav-label">Datos maestros</div>
-          <div className="nav-item" onClick={() => navegar('maestros_empleados')}>
-            <span className="nav-icon">👥</span> Empleados
-          </div>
+          {/* Maestros y administración: solo administradores (el backend también lo exige). */}
+          {usuario.esAdmin && (
+            <>
+            <div className="nav-label">Datos maestros</div>
+            <div className="nav-item" onClick={() => navegar('maestros_empleados')}>
+              <span className="nav-icon">👥</span> Empleados
+            </div>
           
-          <div className="nav-item" onClick={() => navegar('maestros_cuentas')}>
-            <span className="nav-icon">🧮</span> Cuentas Contables
-          </div>
+            <div className="nav-item" onClick={() => navegar('maestros_cuentas')}>
+              <span className="nav-icon">🧮</span> Cuentas Contables
+            </div>
           
-          <div className="nav-item" onClick={() => navegar('maestros_productos')}>
-            <span className="nav-icon">📦</span> Productos
-          </div>
+            <div className="nav-item" onClick={() => navegar('maestros_productos')}>
+              <span className="nav-icon">📦</span> Productos
+            </div>
           
-          <div className="nav-item" onClick={() => navegar('maestros_clientes')}>
-            <span className="nav-icon">🤝</span> Clientes
-          </div>
+            <div className="nav-item" onClick={() => navegar('maestros_clientes')}>
+              <span className="nav-icon">🤝</span> Clientes
+            </div>
           
-          <div className="nav-item" onClick={() => navegar('maestros_usuarios')}>
-            <span className="nav-icon">🔐</span> Usuarios
-          </div>
+            <div className="nav-item" onClick={() => navegar('maestros_usuarios')}>
+              <span className="nav-icon">🔐</span> Usuarios Odoo
+            </div>
 
-          <div className="nav-item" onClick={() => navegar('maestros_formulas')}>
-            <span className="nav-icon">🔐</span> Fórmulas
-          </div>
+            <div className="nav-item" onClick={() => navegar('maestros_formulas')}>
+              <span className="nav-icon">🧪</span> Fórmulas
+            </div>
 
-          
+            <div className="nav-label">Administración</div>
+            <div className="nav-item" onClick={() => navegar('admin_usuarios')}>
+              <span className="nav-icon">🛡️</span> Usuarios y permisos
+            </div>
+            <div className="nav-item" onClick={() => navegar('admin_actividad')}>
+              <span className="nav-icon">📊</span> Análisis de uso
+            </div>
+            </>
+          )}
         </nav>
         <div className="sidebar-foot">SISTEMA CORPORATIVO · v2026.1</div>
       </aside>
@@ -100,9 +111,12 @@ export default function Layout({
             <div className="breadcrumb">{renderBreadcrumbs()}</div>
           </div>
           <div className="user-chip">
-            <div className="avatar">{usuario.iniciales}</div>
+            <div className="avatar" title={`${usuario.email} · ${usuario.rolTexto}`}>{usuario.iniciales}</div>
             <span className="hidden-desktop" style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: 500 }}>
               {usuario.nombre}
+            </span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', whiteSpace: 'nowrap' }}>
+              {usuario.esAdmin ? 'Administrador' : (usuario.areasPermitidas || []).join(', ')}
             </span>
             <button onClick={cerrarSesion} className="btn-ghost">Cerrar sesión</button>
           </div>

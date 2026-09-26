@@ -20,7 +20,6 @@ const IMPORTADO_KEY = 'cv_presupuestos_importado_v1';
 
 let cache = null;               // { versiones, registros }
 let modo = 'local';             // 'servidor' | 'local'
-let usuarioSesion = '';         // TEMPORAL hasta el login con Microsoft
 let pendientes = 0;
 let ultimoError = null;
 let cola = Promise.resolve();
@@ -34,14 +33,10 @@ export function estadoConexion() {
   return { modo, pendientes, ultimoError };
 }
 
-export function establecerUsuarioSesion(usuario) {
-  usuarioSesion = usuario || '';
-}
-
 async function api(ruta, { method = 'GET', body } = {}) {
   const resp = await fetch(`${API_URL}/api${ruta}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(usuarioSesion ? { 'x-usuario': usuarioSesion } : {}) },
+    headers: { 'Content-Type': 'application/json' }, // el token de sesión lo agrega config/api.js
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const data = await resp.json().catch(() => ({}));

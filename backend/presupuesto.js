@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { types } = require('pg');
+const { soloAdmin, puedeEditarArea, puedeVerRegistro } = require('./seguridad');
 
 // Las columnas DATE se devuelven tal cual ('2026-01-01'), sin convertir a Date con zona horaria.
 types.setTypeParser(1082, (v) => v);
@@ -50,10 +51,20 @@ async function completarForecastExistente(pool) {
   if (pendientes.rowCount > 0) console.log(`✅ Forecast mensual generado para ${pendientes.rowCount} registros existentes`);
 }
 
-// TEMPORAL hasta el login con Microsoft: el usuario viene en la cabecera x-usuario.
-// Cuando exista la autenticación, un middleware llenará req.usuario con el correo verificado.
-const usuarioDe = (req) => req.usuario?.email || req.get('x-usuario') || 'sin-identificar';
-const ipDe = (req) => req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || null;
+// El usuario sale de la sesión validada (middleware `autenticar` de seguridad.js), nunca del navegador.
+const usuarioDe = (req) => req.usuario.email;
+const ipDe = (req) => req.usuario?.ip || req.socket?.remoteAddress || null;
+
+// Derivado que un costeo de embalajes (Logística) deja en la cuenta de embalaje de un centro de producción.
+const derivadoPermitido = (ctx, r) => puedeEditarArea(ctx.quien, r.area)
+  || (ctx.embalaje && String(r.area || '').startsWith('Producción') && r.modulo === 'Envases y Embalajes');
+
+// Un usuario de área solo crea, edita o elimina registros de sus áreas.
+function exigirArea(ctx, area, idRegistro) {
+  if (!puedeEditarArea(ctx.quien, area)) {
+    throw new ErrorApi(403, `No tienes permiso para modificar registros del área ${area || '(sin área)'} (${idRegistro}).`);
+  }
+}
 
 const esDerivado = (r) => r?.detalle_columnas?.es_derivado === true || String(r?.id_registro || '').startsWith('DERIV-');
 
@@ -246,11 +257,16 @@ async function verificarVersionExiste(cx, idVersion) {
 }
 
 // Inserta o actualiza un registro. Con verificarRev, una edición basada en un `rev` viejo se rechaza (409).
-async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAuditoria = true } = {}) {
+async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAuditoria = true, permitirDerivado = false } = {}) {
   const r = normalizarRegistro(entrada);
   const datos = limpiarDatos(r);
   const derivado = esDerivado(r);
   const actual = await cx.query('SELECT * FROM ppto_registros WHERE id_registro = $1 FOR UPDATE', [r.id_registro]);
+  // Los derivados de un costeo ya se autorizaron con su registro principal (ver /registros/lote).
+  if (!(derivado && permitirDerivado)) {
+    exigirArea(ctx, r.area, r.id_registro);
+    if (actual.rowCount > 0) exigirArea(ctx, actual.rows[0].area, r.id_registro);
+  }
 
   const cab = camposCabecera(r);
 
@@ -296,6 +312,7 @@ async function upsertRegistro(cx, entrada, ctx, { verificarRev = true, conAudito
 // (se regeneran en cada guardado); los demás se eliminan lógicamente con historial.
 async function retirarRegistros(cx, filas, ctx, detalle = null) {
   for (const f of filas) {
+    if (!f.es_derivado || !derivadoPermitido(ctx, f)) exigirArea(ctx, f.area, f.id_registro);
     if (f.es_derivado) {
       await cx.query('DELETE FROM ppto_registros WHERE id_registro = $1', [f.id_registro]);
     } else {
@@ -312,7 +329,7 @@ const escaparLike = (t) => String(t).replace(/[\\%_]/g, c => `\\${c}`);
 
 function crearRouterPresupuesto(pool) {
   const router = express.Router();
-  const ctxDe = (req) => ({ usuario: usuarioDe(req), ip: ipDe(req) });
+  const ctxDe = (req) => ({ usuario: usuarioDe(req), ip: ipDe(req), quien: req.usuario });
   const manejar = (fn) => async (req, res) => {
     try {
       await fn(req, res);
@@ -329,7 +346,9 @@ function crearRouterPresupuesto(pool) {
       pool.query('SELECT * FROM ppto_versiones WHERE NOT eliminado ORDER BY fecha_creacion, id_version'),
       pool.query('SELECT * FROM ppto_registros WHERE NOT eliminado ORDER BY creado_en'),
     ]);
-    res.json({ versiones: v.rows.map(filaAVersion), registros: r.rows.map(filaARegistro) });
+    // Cada usuario recibe solo lo de sus áreas (y lo que otras áreas le comparten para sus costeos).
+    const registros = r.rows.map(filaARegistro).filter(reg => puedeVerRegistro(req.usuario, reg));
+    res.json({ versiones: v.rows.map(filaAVersion), registros });
   }));
 
   // ---------- VERSIONES ----------
@@ -339,7 +358,7 @@ function crearRouterPresupuesto(pool) {
   }));
 
   // Crea una versión; si viene `registros` (clonado), se insertan en la misma transacción.
-  router.post('/versiones', manejar(async (req, res) => {
+  router.post('/versiones', soloAdmin, manejar(async (req, res) => {
     const { version, registros = [] } = req.body || {};
     if (!version?.id_version || !version?.nombre) throw new ErrorApi(400, 'La versión necesita id_version y nombre');
     const ctx = ctxDe(req);
@@ -360,7 +379,7 @@ function crearRouterPresupuesto(pool) {
     res.status(201).json(resultado);
   }));
 
-  router.put('/versiones/:id', manejar(async (req, res) => {
+  router.put('/versiones/:id', soloAdmin, manejar(async (req, res) => {
     const { cambios = {}, rev } = req.body || {};
     const ctx = ctxDe(req);
     const version = await conTransaccion(pool, async (cx) => {
@@ -383,7 +402,7 @@ function crearRouterPresupuesto(pool) {
   }));
 
   // Borrado lógico de la versión y de todos sus registros.
-  router.delete('/versiones/:id', manejar(async (req, res) => {
+  router.delete('/versiones/:id', soloAdmin, manejar(async (req, res) => {
     const ctx = ctxDe(req);
     await conTransaccion(pool, async (cx) => {
       const actual = await cx.query('SELECT * FROM ppto_versiones WHERE id_version = $1 AND NOT eliminado FOR UPDATE', [req.params.id]);
@@ -404,12 +423,12 @@ function crearRouterPresupuesto(pool) {
     if (area) { params.push(area); cond.push(`lower(area) = lower($${params.length})`); }
     if (modulo) { params.push(modulo); cond.push(`lower(modulo) = lower($${params.length})`); }
     const r = await pool.query(`SELECT * FROM ppto_registros WHERE ${cond.join(' AND ')} ORDER BY creado_en`, params);
-    res.json(r.rows.map(filaARegistro));
+    res.json(r.rows.map(filaARegistro).filter(reg => puedeVerRegistro(req.usuario, reg)));
   }));
 
   router.get('/registros/:id', manejar(async (req, res) => {
     const r = await pool.query('SELECT * FROM ppto_registros WHERE id_registro = $1 AND NOT eliminado', [req.params.id]);
-    if (r.rowCount === 0) throw new ErrorApi(404, 'Registro no encontrado');
+    if (r.rowCount === 0 || !puedeVerRegistro(req.usuario, r.rows[0])) throw new ErrorApi(404, 'Registro no encontrado');
     res.json(filaARegistro(r.rows[0]));
   }));
 
@@ -446,6 +465,13 @@ function crearRouterPresupuesto(pool) {
     const { registros = [], reemplazar } = req.body || {};
     if (!Array.isArray(registros) || registros.length === 0) throw new ErrorApi(400, 'No se enviaron registros');
     const ctx = ctxDe(req);
+    // El registro principal del costeo debe ser de un área del usuario. Sus derivados pueden ir a
+    // otra área solo en el caso previsto: Logística costea el embalaje de los centros de producción.
+    const principales = registros.filter(r => !esDerivado(r));
+    if (principales.length === 0) throw new ErrorApi(400, 'El lote no tiene registro principal');
+    principales.forEach(r => exigirArea(ctx, r.area, r.id_registro));
+    ctx.embalaje = principales.every(r => r.modulo === 'Costeo de Embalajes');
+    registros.filter(esDerivado).forEach(r => { if (!derivadoPermitido(ctx, r)) exigirArea(ctx, r.area, r.id_registro); });
     const filas = await conTransaccion(pool, async (cx) => {
       const versiones = new Set(registros.map(r => r.id_version || r.idVersion));
       for (const v of versiones) await verificarVersionExiste(cx, v);
@@ -466,7 +492,7 @@ function crearRouterPresupuesto(pool) {
       await retirarRegistros(cx, previos.rows.filter(f => !idsNuevos.has(f.id_registro)), ctx, 'Reemplazado al volver a guardar el costeo');
 
       const out = [];
-      for (const r of registros) out.push(await upsertRegistro(cx, r, ctx, { verificarRev: false }));
+      for (const r of registros) out.push(await upsertRegistro(cx, r, ctx, { verificarRev: false, permitirDerivado: true }));
 
       const principal = registros.find(r => !esDerivado(r)) || registros[0];
       await auditar(cx, { ...ctx, accion: 'LOTE', tabla: 'ppto_registros', id_objeto: reemplazar || registros[0].id_lote || principal.id_registro,
@@ -493,6 +519,7 @@ function crearRouterPresupuesto(pool) {
       const actual = await cx.query('SELECT * FROM ppto_registros WHERE id_registro = $1 AND eliminado FOR UPDATE', [req.params.id]);
       if (actual.rowCount === 0) throw new ErrorApi(404, 'No hay un registro eliminado con ese id');
       const f = actual.rows[0];
+      exigirArea(ctx, f.area, f.id_registro);
       const upd = await cx.query(
         `UPDATE ppto_registros SET eliminado = false, eliminado_por = NULL, eliminado_en = NULL, rev = rev + 1,
                 actualizado_por = $2, actualizado_en = now() WHERE id_registro = $1 RETURNING *`,
@@ -505,7 +532,7 @@ function crearRouterPresupuesto(pool) {
   }));
 
   // ---------- HISTORIAL ----------
-  router.get('/auditoria', manejar(async (req, res) => {
+  router.get('/auditoria', soloAdmin, manejar(async (req, res) => {
     const { tabla, id_objeto, usuario, version, area, modulo, desde, hasta } = req.query;
     const limite = Math.min(parseInt(req.query.limite, 10) || 200, 1000);
     const cond = [];
@@ -528,7 +555,7 @@ function crearRouterPresupuesto(pool) {
   }));
 
   // ---------- IMPORTAR lo que había en localStorage (una sola vez por navegador) ----------
-  router.post('/presupuesto/importar', manejar(async (req, res) => {
+  router.post('/presupuesto/importar', soloAdmin, manejar(async (req, res) => {
     const { versiones = [], registros = [] } = req.body || {};
     const ctx = ctxDe(req);
     const resumen = await conTransaccion(pool, async (cx) => {

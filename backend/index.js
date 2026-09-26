@@ -4,10 +4,21 @@ const cors = require('cors');
 require('dotenv').config();
 const { crearRouterPresupuesto, inicializarEsquemaPresupuesto } = require('./presupuesto');
 const { asegurarClasificacionCuentas } = require('./clasificacionCuentas');
+const {
+  cabecerasSeguridad, autenticar, soloAdmin, prefijosDe,
+  crearRouterAuth, crearRouterSesion, crearRouterAdmin, inicializarEsquemaSeguridad,
+} = require('./seguridad');
 
 const app = express();
+// Render / proxies: la IP real del usuario viene en X-Forwarded-For.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(cabecerasSeguridad);
 // CORS_ORIGIN (separado por comas) limita qué dominios pueden llamar a la API; sin definir, se permite todo (desarrollo).
 const origenesPermitidos = (process.env.CORS_ORIGIN || '').split(',').map(o => o.trim()).filter(Boolean);
+if (process.env.NODE_ENV === 'production' && origenesPermitidos.length === 0) {
+  console.warn('⚠ CORS_ORIGIN vacío en producción: cualquier sitio web podría llamar a la API. Defínalo con la URL del frontend.');
+}
 app.use(cors(origenesPermitidos.length ? { origin: origenesPermitidos } : undefined));
 // Los costeos envían sus registros derivados en un solo lote: se sube el límite por defecto (100kb).
 app.use(express.json({ limit: '15mb' }));
@@ -29,7 +40,13 @@ const dbLocal = new Pool({
   port: parseInt(process.env.DB_LOCAL_PORT || 5433),
 });
 
-// Versiones, registros (CRUD) e historial de cambios del presupuesto
+// Login (público). Todo lo que sigue en /api exige una sesión válida.
+app.use('/api', crearRouterAuth(dbLocal));
+app.use('/api', autenticar(dbLocal));
+app.use('/api', crearRouterSesion(dbLocal));
+// Usuarios, permisos y análisis de uso (solo administradores)
+app.use('/api', crearRouterAdmin(dbLocal));
+// Versiones, registros (CRUD) e historial de cambios del presupuesto (con permisos por área)
 app.use('/api', crearRouterPresupuesto(dbLocal));
 
 // =====================================================================
@@ -766,7 +783,10 @@ app.get('/api/eerr/ejecutado', async (req, res) => {
         GROUP BY aa.code, EXTRACT(MONTH FROM aml.date)`,
       [`${anio}-01-01`, `${anio + 1}-01-01`]
     );
-    res.json(resultado.rows.map(f => ({ codigo: String(f.codigo), mes: f.mes, saldo: parseFloat(f.saldo) || 0 })));
+    // Un usuario de área solo recibe las cuentas de destino de sus áreas (p. ej. 94... para Administración).
+    const prefijos = prefijosDe(req.usuario);
+    const filas = prefijos ? resultado.rows.filter(f => prefijos.some(pr => String(f.codigo).startsWith(pr))) : resultado.rows;
+    res.json(filas.map(f => ({ codigo: String(f.codigo), mes: f.mes, saldo: parseFloat(f.saldo) || 0 })));
   } catch (error) {
     console.error('Error obteniendo el ejecutado del EERR:', error.message);
     res.status(500).json({ error: 'No se pudo leer el ejecutado desde Odoo', detalle: error.message });
@@ -777,7 +797,7 @@ app.get('/api/eerr/ejecutado', async (req, res) => {
 // RUTAS DE FORECASTS / REGISTROS (BD Propia)
 // ----------------------------------------------------
 
-app.get('/api/forecasts', async (req, res) => {
+app.get('/api/forecasts', soloAdmin, async (req, res) => {
   try {
     const resultado = await dbLocal.query('SELECT * FROM forecasts_proyecto ORDER BY id_registro DESC');
     res.json(resultado.rows);
@@ -786,7 +806,7 @@ app.get('/api/forecasts', async (req, res) => {
   }
 });
 
-app.post('/api/forecasts', async (req, res) => {
+app.post('/api/forecasts', soloAdmin, async (req, res) => {
   try {
     const { id_registro, id_lote, area, version, detalle_columnas } = req.body;
     const query = `
@@ -807,7 +827,7 @@ app.post('/api/forecasts', async (req, res) => {
 // ENDPOINT DE SINCRONIZACIÓN MANUAL
 // ----------------------------------------------------
 
-app.get('/api/sincronizar/maestros', async (req, res) => {
+app.get('/api/sincronizar/maestros', soloAdmin, async (req, res) => {
   try {
     await sincronizarMaestros();
     res.json({ success: true, mensaje: '¡Maestros sincronizados localmente con éxito!' });
@@ -826,6 +846,13 @@ app.listen(PORT, async () => {
   
   // Mantenemos solo el test de conexiones para que sepas si Odoo y la local responden al encender
   await probarConexiones();
+
+  try {
+    await inicializarEsquemaSeguridad(dbLocal);
+    console.log('✅ Tablas de seguridad listas (ppto_usuarios_acceso, ppto_sesiones, ppto_actividad)');
+  } catch (err) {
+    console.error('❌ No se pudieron crear las tablas de seguridad:', err.message);
+  }
 
   try {
     await inicializarEsquemaPresupuesto(dbLocal);
@@ -847,7 +874,7 @@ app.listen(PORT, async () => {
 // =====================================================================
 // ENDPOINT PARA EL BOTÓN DE SINCRONIZACIÓN MANUAL DESDE EL FRONTEND
 // =====================================================================
-app.post('/api/sincronizar/maestros', async (req, res) => {
+app.post('/api/sincronizar/maestros', soloAdmin, async (req, res) => {
   try {
     console.log('🔄 Ejecutando sincronización manual solicitada desde la interfaz...');
     
@@ -873,7 +900,7 @@ app.post('/api/sincronizar/maestros', async (req, res) => {
 // ----------------------------------------------------
 
 // 1. Actualizar Empleado
-app.put('/api/maestros/empleados/:id', async (req, res) => {
+app.put('/api/maestros/empleados/:id', soloAdmin, async (req, res) => {
   const { id } = req.params;
   
   // Capturamos todos los campos enviados desde el formulario de React
@@ -921,7 +948,7 @@ app.put('/api/maestros/empleados/:id', async (req, res) => {
 });
 
 // 2. Actualizar Cuenta Contable
-app.put('/api/maestros/cuentas/:id', async (req, res) => {
+app.put('/api/maestros/cuentas/:id', soloAdmin, async (req, res) => {
   const { id } = req.params;
   const { nombre, categoria, subcategoria, grupo } = req.body;
   // Clasificación para reportes: si el campo viene en la petición se guarda tal cual (vacío = sin clasificar)
@@ -952,7 +979,7 @@ app.put('/api/maestros/cuentas/:id', async (req, res) => {
 });
 
 // 3. Actualizar Cliente
-app.put('/api/maestros/clientes/:id', async (req, res) => {
+app.put('/api/maestros/clientes/:id', soloAdmin, async (req, res) => {
   const { id } = req.params;
   const { nombre, zona, vendedor, pais, tipo } = req.body;
   try {
@@ -976,7 +1003,7 @@ app.put('/api/maestros/clientes/:id', async (req, res) => {
 });
 
 // 4. Actualizar Producto (Corregido para capturar 'pv', 'unidad' y 'costo')
-app.put('/api/maestros/productos/:id', async (req, res) => {
+app.put('/api/maestros/productos/:id', soloAdmin, async (req, res) => {
   const { id } = req.params; 
   const { codigo, nombre, categoria, precio_venta, pv, unidad, costo } = req.body;
   const precioFinal = precio_venta !== undefined ? precio_venta : (pv !== undefined ? pv : 0);
@@ -1003,7 +1030,7 @@ app.put('/api/maestros/productos/:id', async (req, res) => {
 });
 
 // 5. Actualizar Usuario
-app.put('/api/maestros/usuarios/:id', async (req, res) => {
+app.put('/api/maestros/usuarios/:id', soloAdmin, async (req, res) => {
   const { id } = req.params;
   const { login, nombre, rol } = req.body;
   try {
