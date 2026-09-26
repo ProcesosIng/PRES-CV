@@ -124,7 +124,7 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
           <span style={label}>MES</span>
           <select value={mesSel} onChange={e => setMesSel(e.target.value)} style={control}>
             <option value="todos">Todos los meses</option>
-            {MESES_EERR.map((m, i) => <option key={m} value={i}>{m}</option>)}
+            {MESES_EERR.map((m, i) => <option key={m} value={i}>{m}{String(anio) === String(new Date().getFullYear()) && i === new Date().getMonth() ? ' · en curso (abierto)' : ''}</option>)}
           </select>
         </div>
         <div><span style={label}>% PARTICIPACIÓN TRAB.</span><input type="number" step="0.1" value={tasaPart} onChange={e => setTasaPart(e.target.value)} style={{ ...control, width: '90px' }} /></div>
@@ -171,7 +171,7 @@ export default function EstadoResultados({ registrosTotales = [], versiones = []
       </div>
       <div style={{ fontSize: '10px', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
         Mismas fórmulas que el Power BI (saldo = debe − haber): Ventas ABS(70) · Dscto 74 · Costo 69 · Gastos 9x62–9x65 (98 Log., 99 Alm., 95 Com., 94 Adm.) · Depre 9x68 · Otros Ing ABS(75, 775, 7611) · IngFinan ABS(7792) · GastFinan 976711/97673/976793 · DifCamb −(776, 97676) · Participación e IR = tasa × utilidad.
-        {' '}<b>Proyectado:</b> ventas (cuentas 70x) y costo de ventas (69x) del Forecast: precio y costo unitario del vendedor × cantidad esperada + gastos registrados en el sistema. <b>Ejecutado:</b> asientos publicados en Odoo de los meses cerrados (el mes en curso no se considera hasta su cierre).
+        {' '}<b>Proyectado:</b> ventas (cuentas 70x) y costo de ventas (69x) del Forecast: precio y costo unitario del vendedor × cantidad esperada + gastos registrados en el sistema. <b>Ejecutado:</b> asientos publicados en Odoo; el mes en curso sigue abierto (puede tener asientos por saldar), quítalo con el filtro de meses si quieres ver solo meses cerrados.
         {' '}Variación = Ejecutado − Proyectado; verde = favorable (más ingreso/utilidad o menos costo/gasto).
       </div>
     </div>

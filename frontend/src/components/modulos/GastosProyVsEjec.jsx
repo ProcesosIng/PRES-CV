@@ -160,6 +160,178 @@ function TablaArbol({ arbol, mesesVisibles, conPeso, titulo, abiertoPorDefecto =
   );
 }
 
+// ---------------------------------------------------------------------------------------------
+// Vista estructurada: indicadores, áreas, tendencia mensual, detalle (área → grupo → subgrupo →
+// cuenta) y principales desviaciones. Aquí los montos van en POSITIVO (gasto); la tabla mensual
+// de abajo conserva el formato del Power BI (gastos en negativo).
+// ---------------------------------------------------------------------------------------------
+const COLOR_PROY = '#2a78d6';
+const COLOR_EJEC = '#eb6834';
+const OK = '#15803d';
+const MAL = '#dc2626';
+const soles = (v, d = 0) => `S/ ${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+const solesMil = (v) => (Math.abs(v) >= 1e6 ? `S/ ${(Math.abs(v) / 1e6).toFixed(2)} M` : Math.abs(v) >= 1e3 ? `S/ ${(Math.abs(v) / 1e3).toFixed(1)} mil` : soles(v));
+const pctTxt = (v, d = 1) => (v === null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(d)}%`);
+// Gasto (positivo) proyectado y ejecutado de un nodo en los meses elegidos; ahorro = proy − ejec.
+const gastoDe = (nodo, meses) => { const v = valoresDe(nodo, meses); const p = -v.p; const e = -v.e; return { p, e, ahorro: p - e, ejec: p > 0 ? e / p : null }; };
+
+function Variacion({ ahorro, p, compacto }) {
+  if (Math.abs(ahorro) < 0.5) return <span style={{ color: '#64748b' }}>—</span>;
+  const bueno = ahorro >= 0;
+  return (
+    <span style={{ color: bueno ? OK : MAL, fontWeight: 700, whiteSpace: 'nowrap' }}>
+      {bueno ? '▼' : '▲'} {compacto ? solesMil(ahorro) : soles(ahorro)}{!compacto && p > 0 ? ` (${pctTxt(Math.abs(ahorro) / p)})` : ''}
+      <span style={{ fontWeight: 500, color: '#64748b' }}> {bueno ? 'ahorro' : 'sobregasto'}</span>
+    </span>
+  );
+}
+
+// Barra de ejecución: ejecutado / proyectado, con marca en el 100%.
+function BarraEjecucion({ ejec, ancho = 120 }) {
+  if (ejec === null || !Number.isFinite(ejec)) return <span style={{ color: '#94a3b8' }}>—</span>;
+  const tope = 1.5;
+  const w = Math.min(ejec, tope) / tope * ancho;
+  const color = ejec > 1.0001 ? MAL : COLOR_PROY;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
+      <div style={{ position: 'relative', width: `${ancho}px`, height: '8px', background: '#eef2f7', borderRadius: '4px' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${w}px`, background: color, borderRadius: '4px' }} />
+        <div style={{ position: 'absolute', left: `${ancho / tope}px`, top: '-3px', bottom: '-3px', width: '2px', background: '#0f172a' }} title="100% del proyectado" />
+      </div>
+      <span style={{ fontSize: '11px', fontWeight: 700, color: ejec > 1.0001 ? MAL : '#334155', minWidth: '46px', textAlign: 'right' }}>{pctTxt(ejec, 0)}</span>
+    </div>
+  );
+}
+
+function Tarjeta({ titulo, valor, sub, color, children }) {
+  return (
+    <div style={{ background: 'white', border: '1px solid #e2e8f0', borderTop: `4px solid ${color}`, borderRadius: '10px', padding: '12px 14px', minWidth: 0 }}>
+      <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em' }}>{titulo}</div>
+      <div style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{valor}</div>
+      {sub && <div style={{ fontSize: '11.5px', color: '#475569', marginTop: '2px' }}>{sub}</div>}
+      {children}
+    </div>
+  );
+}
+
+// Tendencia mensual: barras agrupadas proyectado vs ejecutado (un solo eje, en soles).
+function Tendencia({ arbol, mesesSel, mesAbierto }) {
+  const [hover, setHover] = useState(null);
+  const datos = MESES.map((_, i) => gastoDe(arbol, [i]));
+  const max = Math.max(1, ...datos.flatMap(d => [d.p, d.e]));
+  const alto = 170;
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '16px', fontSize: '11.5px', color: '#334155', marginBottom: '8px', flexWrap: 'wrap' }}>
+        <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: COLOR_PROY, borderRadius: '2px', marginRight: '5px' }} />Proyectado</span>
+        <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: COLOR_EJEC, borderRadius: '2px', marginRight: '5px' }} />Ejecutado</span>
+        {mesAbierto !== null && <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 2px, #fde2d4 2px 4px)`, borderRadius: '2px', marginRight: '5px' }} />Mes en curso (abierto)</span>}
+        <span style={{ color: '#94a3b8' }}>Los meses fuera del filtro se ven atenuados.</span>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '6px', alignItems: 'end', height: `${alto}px`, borderBottom: '1px solid #cbd5e1', padding: '0 2px' }}>
+          {datos.map((d, i) => {
+            const activo = mesesSel.includes(i);
+            const abierto = i === mesAbierto;
+            return (
+              <div key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+                style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '2px', height: '100%', opacity: activo ? 1 : 0.3, cursor: 'default', background: hover === i ? '#f1f5f9' : 'transparent', borderRadius: '4px 4px 0 0' }}>
+                <div style={{ width: '38%', height: `${(d.p / max) * 100}%`, background: COLOR_PROY, borderRadius: '4px 4px 0 0' }} />
+                <div style={{ width: '38%', height: `${(d.e / max) * 100}%`, background: abierto ? `repeating-linear-gradient(45deg, ${COLOR_EJEC} 0 3px, #fde2d4 3px 6px)` : COLOR_EJEC, borderRadius: '4px 4px 0 0' }} />
+              </div>
+            );
+          })}
+        </div>
+        {hover !== null && (
+          <div style={{ position: 'absolute', top: 0, left: `${Math.min(hover, 9) * (100 / 12)}%`, background: '#0f172a', color: 'white', borderRadius: '8px', padding: '8px 10px', fontSize: '11.5px', pointerEvents: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.2)', zIndex: 5, minWidth: '190px' }}>
+            <div style={{ fontWeight: 800, marginBottom: '4px', textTransform: 'capitalize' }}>{MESES[hover]}{hover === mesAbierto ? ' · en curso (abierto)' : ''}</div>
+            <div>Proyectado: <b>{soles(datos[hover].p)}</b></div>
+            <div>Ejecutado: <b>{soles(datos[hover].e)}</b></div>
+            <div>Ejecución: <b>{pctTxt(datos[hover].ejec)}</b> · {datos[hover].ahorro >= 0 ? 'ahorro' : 'sobregasto'} {soles(datos[hover].ahorro)}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '6px', fontSize: '10.5px', color: '#475569', textAlign: 'center', marginTop: '4px' }}>
+        {MESES.map((m, i) => <div key={m} style={{ fontWeight: i === mesAbierto ? 800 : 500 }}>{m.slice(0, 3)}{i === mesAbierto ? ' ●' : ''}</div>)}
+      </div>
+    </div>
+  );
+}
+
+// Detalle y subdetalle: Área → Grupo → Subgrupo → Cuenta, totales del periodo elegido.
+function TablaDetalle({ arbol, meses, expandirTodo }) {
+  const [abiertos, setAbiertos] = useState({});
+  const estaAbierto = (n) => expandirTodo || !!abiertos[n.clave];
+  const filas = [];
+  const recorrer = (nodo, area) => {
+    Object.values(nodo.hijos)
+      .map(h => ({ h, g: gastoDe(h, meses) }))
+      .filter(x => Math.abs(x.g.p) >= 0.5 || Math.abs(x.g.e) >= 0.5)
+      .sort((a, b) => Math.max(b.g.p, b.g.e) - Math.max(a.g.p, a.g.e))
+      .forEach(({ h, g }) => {
+        const ar = h.nivel === 0 ? g : area;
+        filas.push({ h, g, area: ar });
+        if (Object.keys(h.hijos).length && estaAbierto(h)) recorrer(h, ar);
+      });
+  };
+  recorrer(arbol, null);
+  const total = gastoDe(arbol, meses);
+  const NIVEL = ['Área', 'Grupo', 'Subgrupo', 'Cuenta'];
+  const fondo = ['#eff6ff', '#f8fafc', 'white', 'white'];
+  const th = { padding: '8px 10px', fontSize: '10.5px', color: '#475569', textAlign: 'right', background: '#f8fafc', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 1 };
+  const td = { padding: '7px 10px', fontSize: '12px', textAlign: 'right', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' };
+  const expandirNivel = (nivelMax) => {
+    const nuevos = {};
+    const marcar = (n) => Object.values(n.hijos).forEach(h => { if (h.nivel < nivelMax) { nuevos[h.clave] = true; marcar(h); } });
+    marcar(arbol);
+    setAbiertos(nuevos);
+  };
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }} data-no-print>
+        <span style={{ fontSize: '11.5px', color: '#64748b', alignSelf: 'center' }}>Abrir hasta:</span>
+        {['Área', 'Grupo', 'Subgrupo', 'Cuenta'].map((n, i) => <button key={n} type="button" className="btn-ghost" onClick={() => expandirNivel(i)} style={{ padding: '4px 10px', fontSize: '11.5px' }}>{n}</button>)}
+      </div>
+      <div style={{ overflow: 'auto', maxHeight: '560px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+        <table data-hoja="Detalle por área" data-titulo="Gastos - detalle por área, grupo, subgrupo y cuenta (gasto en positivo)" style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <thead><tr>
+            <th style={{ ...th, textAlign: 'left', minWidth: '320px' }}>Área / grupo / subgrupo / cuenta</th>
+            <th style={th}>Proyectado</th><th style={th}>Peso</th><th style={th}>Ejecutado</th><th style={th}>Variación</th><th style={th}>Ejecución</th>
+          </tr></thead>
+          <tbody>
+            {filas.map(({ h, g, area }) => {
+              const tieneHijos = Object.keys(h.hijos).length > 0;
+              const peso = h.nivel === 0 ? (total.p > 0 ? g.p / total.p : null) : (area?.p > 0 ? g.p / area.p : null);
+              return (
+                <tr key={h.clave} style={{ background: fondo[h.nivel] || 'white' }}>
+                  <td data-nivel={h.nivel} onClick={() => tieneHijos && setAbiertos(p => ({ ...p, [h.clave]: !estaAbierto(h) }))}
+                    style={{ ...td, textAlign: 'left', paddingLeft: `${10 + h.nivel * 18}px`, cursor: tieneHijos ? 'pointer' : 'default', fontWeight: h.nivel === 0 ? 800 : h.nivel === 1 ? 700 : 500, color: '#0f172a', maxWidth: '460px', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                    title={`${NIVEL[h.nivel] || ''}: ${h.etiqueta}`}>
+                    <span data-no-excel style={{ display: 'inline-block', width: '16px', color: '#64748b' }}>{tieneHijos ? (estaAbierto(h) ? '▾' : '▸') : ''}</span>{h.etiqueta}
+                  </td>
+                  <td style={td} data-valor={g.p} data-formato="moneda">{soles(g.p)}</td>
+                  <td style={{ ...td, color: '#64748b' }} data-valor={peso ?? ''} data-formato="pct">{pctTxt(peso)}</td>
+                  <td style={td} data-valor={g.e} data-formato="moneda">{soles(g.e)}</td>
+                  <td style={td} data-valor={g.ahorro} data-formato="moneda"><Variacion ahorro={g.ahorro} p={g.p} /></td>
+                  <td style={td} data-valor={g.ejec ?? ''} data-formato="pct"><BarraEjecucion ejec={g.ejec} ancho={90} /></td>
+                </tr>
+              );
+            })}
+            <tr style={{ background: '#e2e8f0' }}>
+              <td style={{ ...td, textAlign: 'left', fontWeight: 800 }}>TOTAL</td>
+              <td style={{ ...td, fontWeight: 800 }} data-valor={total.p} data-formato="moneda">{soles(total.p)}</td>
+              <td style={td}>100%</td>
+              <td style={{ ...td, fontWeight: 800 }} data-valor={total.e} data-formato="moneda">{soles(total.e)}</td>
+              <td style={td} data-valor={total.ahorro} data-formato="moneda"><Variacion ahorro={total.ahorro} p={total.p} /></td>
+              <td style={td} data-valor={total.ejec ?? ''} data-formato="pct"><BarraEjecucion ejec={total.ejec} ancho={90} /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function GastosProyVsEjec({ registrosTotales = [], versiones = [], idVersionFiltro = '', expandirTodo = false }) {
   const idVersion = idVersionFiltro || versiones[versiones.length - 1]?.id_version || '';
 
@@ -173,6 +345,9 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
   }, [registrosTotales, idVersion]);
   const [anioSel, setAnioSel] = useState('');
   const anio = anios.includes(anioSel) ? anioSel : (anios[anios.length - 1] || String(new Date().getFullYear()));
+  // Mes en curso: se muestra, pero se marca "abierto" (asientos por saldar) y se puede quitar con el filtro.
+  const hoy = new Date();
+  const mesAbierto = String(hoy.getFullYear()) === String(anio) ? hoy.getMonth() : null;
 
   const [ejecutadoOdoo, setEjecutadoOdoo] = useState([]);
   const [estadoEjec, setEstadoEjec] = useState('cargando');
@@ -209,10 +384,10 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
   const areas = useMemo(() => [...new Set(movimientos.map(m => m.area))].sort(), [movimientos]);
   const [areasSel, setAreasSel] = useState(null); // null = todas
   const [mesesSel, setMesesSel] = useState(MESES.map((_, i) => i));
+  const [verMensual, setVerMensual] = useState(false);
   const areasActivas = areasSel ? areas.filter(a => areasSel.includes(a)) : areas;
 
   // Una sola etiqueta por CÓDIGO: el nombre del maestro y, si no está, el primero que traiga un registro.
-  // (Así la misma cuenta no se parte en dos filas si el proyectado y Odoo la nombran distinto.)
   const nombrePorCodigo = useMemo(() => {
     const mapa = {};
     movimientos.forEach(m => {
@@ -226,63 +401,177 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
     return nombre ? `${m.codigo} - ${abreviarNombreCuenta(nombre)}` : m.codigo;
   };
 
-  const filtrados = movimientos.filter(m => areasActivas.includes(m.area) && mesesSel.includes(m.mes));
-  const arbolAreas = useMemo(() => construirArbol(filtrados, [m => m.area, m => m.grupo, m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
-  const arbolSubgrupos = useMemo(() => construirArbol(filtrados, [m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
+  const deAreas = movimientos.filter(m => areasActivas.includes(m.area));
+  const filtrados = deAreas.filter(m => mesesSel.includes(m.mes));
+  const arbolAreas = useMemo(() => construirArbol(filtrados, [m => m.area, m => m.grupo, m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const arbolSubgrupos = useMemo(() => construirArbol(filtrados, [m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Resumen: todos los meses (la tendencia los muestra todos y atenúa los que están fuera del filtro).
+  const arbolResumen = useMemo(() => construirArbol(deAreas, [m => m.area, m => m.grupo, m => m.subgrupo, etiquetaCuenta]), [deAreas, nombrePorCodigo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const arbolTodasAreas = useMemo(() => construirArbol(movimientos, [m => m.area]), [movimientos]);
+
+  // ---------- indicadores ----------
+  const total = gastoDe(arbolResumen, mesesSel);
+  const porArea = Object.values(arbolTodasAreas.hijos).map(n => ({ area: n.etiqueta, ...gastoDe(n, mesesSel) }))
+    .filter(a => a.p > 0.5 || a.e > 0.5).sort((a, b) => b.p - a.p);
+  const porAreaActivas = porArea.filter(a => areasActivas.includes(a.area));
+  const peorArea = [...porAreaActivas].sort((a, b) => a.ahorro - b.ahorro)[0];
+  const mejorArea = [...porAreaActivas].sort((a, b) => b.ahorro - a.ahorro)[0];
+  const mesesConEjec = mesesSel.filter(i => gastoDe(arbolResumen, [i]).e > 0.5).length;
+  // Principales desviaciones por cuenta en el periodo.
+  const desviaciones = useMemo(() => {
+    const porCuenta = {};
+    filtrados.forEach(m => {
+      const k = `${m.area}|${m.codigo}`;
+      if (!porCuenta[k]) porCuenta[k] = { area: m.area, cuenta: etiquetaCuenta(m), subgrupo: m.subgrupo, p: 0, e: 0 };
+      porCuenta[k].p += -m.proyectado;
+      porCuenta[k].e += -m.ejecutado;
+    });
+    return Object.values(porCuenta).map(c => ({ ...c, ahorro: c.p - c.e }));
+  }, [filtrados, nombrePorCodigo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topSobregasto = desviaciones.filter(d => d.ahorro < -0.5).sort((a, b) => a.ahorro - b.ahorro).slice(0, 8);
+  const topAhorro = desviaciones.filter(d => d.ahorro > 0.5).sort((a, b) => b.ahorro - a.ahorro).slice(0, 8);
 
   const toggle = (lista, valor) => (lista.includes(valor) ? lista.filter(v => v !== valor) : [...lista, valor]);
-  const panel = { background: 'white', border: '2px solid #1e3a8a', borderRadius: '8px', marginBottom: '10px', overflow: 'hidden' };
-  const cab = { background: '#1e3a8a', color: 'white', fontWeight: 800, textAlign: 'center', padding: '6px', fontSize: '12px' };
-  const item = { display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' };
+  const cerrados = mesAbierto === null ? MESES.map((_, i) => i) : MESES.map((_, i) => i).filter(i => i < mesAbierto);
+  const hastaHoy = mesAbierto === null ? MESES.map((_, i) => i) : MESES.map((_, i) => i).filter(i => i <= mesAbierto);
+  const igual = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const periodo = mesesSel.length === 12 ? 'todo el año' : mesesSel.length === 0 ? 'sin meses' : mesesSel.length === 1 ? MESES[mesesSel[0]] : `${MESES[mesesSel[0]]} a ${MESES[mesesSel[mesesSel.length - 1]]} (${mesesSel.length} meses)`;
+
+  const card = { background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 18px', marginBottom: '14px' };
+  const h3 = { margin: '0 0 10px', fontSize: '15px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' };
+  const chip = (activo) => ({ padding: '5px 11px', borderRadius: '999px', border: `1px solid ${activo ? '#1e3a8a' : '#cbd5e1'}`, background: activo ? '#1e3a8a' : 'white', color: activo ? 'white' : '#334155', fontSize: '12px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' });
+  const tdL = { padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #f1f5f9' };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '190px 1fr', gap: '12px', alignItems: 'start' }}>
-      <div>
-        <div style={panel}>
-          <div style={cab}>ÁREA</div>
-          <div style={{ maxHeight: '160px', overflowY: 'auto', padding: '4px 0' }}>
-            {areas.map(a => (
-              <label key={a} style={item}>
-                <input type="checkbox" checked={areasActivas.includes(a)} onChange={() => setAreasSel(toggle(areasActivas, a))} /> {a.toUpperCase()}
-              </label>
-            ))}
-            {areas.length === 0 && <div style={{ ...item, color: '#94a3b8' }}>Sin datos</div>}
+    <div style={{ minWidth: 0 }}>
+      {/* Encabezado y filtros */}
+      <div style={{ ...card, background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)', color: 'white' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <div style={{ fontSize: '11px', letterSpacing: '.12em', opacity: .8, fontWeight: 700 }}>GASTOS · PROYECTADO VS EJECUTADO{idVersion ? ` · ${idVersion.toUpperCase()}` : ''}</div>
+            <div style={{ fontSize: '24px', fontWeight: 900 }}>C&amp;V International {anio}</div>
+            <div style={{ fontSize: '12px', opacity: .9 }}>Periodo: {periodo} · {areasSel ? `${areasActivas.length} de ${areas.length} áreas` : 'todas las áreas'}</div>
           </div>
-        </div>
-        <div style={panel}>
-          <div style={cab}>AÑO</div>
-          <div style={{ padding: '4px 0' }}>
-            {(anios.length ? anios : [anio]).slice().reverse().map(a => (
-              <label key={a} style={item}><input type="radio" name="anio-gastos" checked={a === anio} onChange={() => setAnioSel(a)} /> {a}</label>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {(anios.length ? anios : [anio]).map(a => (
+              <button key={a} type="button" onClick={() => setAnioSel(a)} style={{ ...chip(a === anio), borderColor: 'rgba(255,255,255,.5)', background: a === anio ? 'white' : 'transparent', color: a === anio ? '#1e3a8a' : 'white' }}>{a}</button>
             ))}
+            <span style={{ fontSize: '11px', fontWeight: 600, marginLeft: '6px', color: estadoEjec === 'ok' ? '#bbf7d0' : estadoEjec === 'error' ? '#fecaca' : '#e2e8f0' }}>
+              {estadoEjec === 'ok' ? '● Ejecutado de Odoo' : estadoEjec === 'error' ? '● Sin conexión a Odoo' : '● Cargando ejecutado...'}
+            </span>
           </div>
-        </div>
-        <div style={panel}>
-          <div style={cab}>MES</div>
-          <div style={{ padding: '4px 0' }}>
-            <label style={{ ...item, fontWeight: 700 }}>
-              <input type="checkbox" checked={mesesSel.length === 12} onChange={() => setMesesSel(mesesSel.length === 12 ? [] : MESES.map((_, i) => i))} /> Todos
-            </label>
-            {MESES.map((m, i) => (
-              <label key={m} style={item}><input type="checkbox" checked={mesesSel.includes(i)} onChange={() => setMesesSel(toggle(mesesSel, i).sort((x, y) => x - y))} /> {m}</label>
-            ))}
-          </div>
-        </div>
-        <div style={{ fontSize: '10px', fontWeight: 600, color: estadoEjec === 'ok' ? '#15803d' : estadoEjec === 'error' ? '#b91c1c' : '#64748b', padding: '0 4px' }}>
-          {estadoEjec === 'ok' ? '● Ejecutado cargado desde Odoo' : estadoEjec === 'error' ? '● No se pudo leer el ejecutado de Odoo' : '● Cargando ejecutado...'}
         </div>
       </div>
 
-      <div style={{ minWidth: 0 }}>
-        <div style={{ background: '#1e3a8a', color: 'white', borderRadius: '8px', padding: '10px 16px', fontSize: '22px', fontWeight: 900, textAlign: 'center', marginBottom: '12px', letterSpacing: '0.02em' }}>
-          GASTOS - C&amp;V INTERNATIONAL · {anio}{idVersion ? ` · ${idVersion.toUpperCase()}` : ''}
+      <div style={{ ...card, padding: '12px 16px' }} data-no-print>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' }}>
+          <b style={{ fontSize: '11px', color: '#64748b', width: '60px' }}>MESES</b>
+          <button type="button" style={chip(mesesSel.length === 12)} onClick={() => setMesesSel(MESES.map((_, i) => i))}>Todo el año</button>
+          {mesAbierto !== null && mesAbierto > 0 && <button type="button" style={chip(igual(mesesSel, cerrados))} onClick={() => setMesesSel(cerrados)}>Meses cerrados</button>}
+          {mesAbierto !== null && <button type="button" style={chip(igual(mesesSel, hastaHoy))} onClick={() => setMesesSel(hastaHoy)}>Hasta el mes en curso</button>}
+          <span style={{ width: '1px', height: '20px', background: '#e2e8f0', margin: '0 4px' }} />
+          {MESES.map((m, i) => (
+            <button key={m} type="button" style={{ ...chip(mesesSel.includes(i)), ...(i === mesAbierto ? { borderStyle: 'dashed' } : {}) }}
+              title={i === mesAbierto ? 'Mes en curso: aún abierto, puede tener asientos por saldar' : ''}
+              onClick={() => setMesesSel(toggle(mesesSel, i).sort((x, y) => x - y))}>
+              {m.slice(0, 3)}{i === mesAbierto ? ' · abierto' : ''}
+            </button>
+          ))}
         </div>
-        <TablaArbol arbol={arbolAreas} mesesVisibles={mesesSel} conPeso titulo="ÁREA GASTOS" abiertoPorDefecto={1} expandirTodo={expandirTodo} />
-        <TablaArbol arbol={arbolSubgrupos} mesesVisibles={mesesSel} conPeso={false} titulo="SUBGRUPO" abiertoPorDefecto={0} expandirTodo={expandirTodo} />
-        <div style={{ fontSize: '10px', color: '#64748b', lineHeight: 1.5 }}>
-          Proyectado: gastos registrados en el sistema para la versión y año. Ejecutado: asientos publicados en Odoo (cuentas de destino 9x) de los meses cerrados; el mes en curso no se considera hasta su cierre.
-          Gastos en negativo · Variación = Ejecutado − Proyectado (verde = se gastó menos) · %Var = Variación / Proyectado · %G = peso dentro del área.
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <b style={{ fontSize: '11px', color: '#64748b', width: '60px' }}>ÁREAS</b>
+          <button type="button" style={chip(!areasSel)} onClick={() => setAreasSel(null)}>Todas</button>
+          {areas.map(a => (
+            <button key={a} type="button" style={chip(!!areasSel && areasSel.includes(a))} onClick={() => { const base = areasSel || []; const nueva = toggle(base, a); setAreasSel(nueva.length ? nueva : null); }}>{a}</button>
+          ))}
         </div>
+      </div>
+
+      {/* Indicadores */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+        <Tarjeta titulo="Gasto proyectado" valor={solesMil(total.p)} sub={soles(total.p)} color={COLOR_PROY} />
+        <Tarjeta titulo="Gasto ejecutado" valor={solesMil(total.e)} sub={`${soles(total.e)} · ${mesesConEjec} ${mesesConEjec === 1 ? 'mes' : 'meses'} con ejecución`} color={COLOR_EJEC} />
+        <Tarjeta titulo={total.ahorro >= 0 ? 'Ahorro' : 'Sobregasto'} valor={<span style={{ color: total.ahorro >= 0 ? OK : MAL }}>{total.ahorro >= 0 ? '▼' : '▲'} {solesMil(total.ahorro)}</span>}
+          sub={total.p > 0 ? `${pctTxt(Math.abs(total.ahorro) / total.p)} ${total.ahorro >= 0 ? 'por debajo' : 'por encima'} de lo proyectado` : ''} color={total.ahorro >= 0 ? OK : MAL} />
+        <Tarjeta titulo="Ejecución del presupuesto" valor={pctTxt(total.ejec)} color="#0f172a">
+          <div style={{ marginTop: '6px' }}><BarraEjecucion ejec={total.ejec} ancho={150} /></div>
+        </Tarjeta>
+        {peorArea && peorArea.ahorro < 0 && <Tarjeta titulo="Mayor sobregasto" valor={peorArea.area} sub={<Variacion ahorro={peorArea.ahorro} p={peorArea.p} compacto />} color={MAL} />}
+        {mejorArea && mejorArea.ahorro > 0 && <Tarjeta titulo="Mayor ahorro" valor={mejorArea.area} sub={<Variacion ahorro={mejorArea.ahorro} p={mejorArea.p} compacto />} color={OK} />}
+      </div>
+
+      {/* Por área */}
+      <div style={card}>
+        <h3 style={h3}>🏢 Por área <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#64748b' }}>· clic en una tarjeta para ver solo esa área</span></h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '10px' }}>
+          {porArea.map(a => {
+            const activa = areasActivas.includes(a.area);
+            const sola = areasSel && areasSel.length === 1 && areasSel[0] === a.area;
+            return (
+              <button key={a.area} type="button" onClick={() => setAreasSel(sola ? null : [a.area])}
+                style={{ textAlign: 'left', background: sola ? '#eff6ff' : 'white', border: `1px solid ${sola ? '#2563eb' : '#e2e8f0'}`, borderLeft: `4px solid ${a.ahorro >= 0 ? OK : MAL}`, borderRadius: '10px', padding: '10px 12px', cursor: 'pointer', opacity: activa ? 1 : 0.45 }}>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: '#0f172a', marginBottom: '4px' }}>{a.area}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: '#475569' }}><span>Proyectado</span><b style={{ color: '#0f172a' }}>{solesMil(a.p)}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: '#475569', marginBottom: '6px' }}><span>Ejecutado</span><b style={{ color: '#0f172a' }}>{solesMil(a.e)}</b></div>
+                <BarraEjecucion ejec={a.ejec} ancho={130} />
+                <div style={{ fontSize: '11.5px', marginTop: '4px' }}><Variacion ahorro={a.ahorro} p={a.p} compacto /></div>
+              </button>
+            );
+          })}
+          {porArea.length === 0 && <div style={{ color: '#94a3b8', fontSize: '13px' }}>No hay gastos para los filtros seleccionados.</div>}
+        </div>
+      </div>
+
+      {/* Tendencia */}
+      <div style={card} data-no-excel>
+        <h3 style={h3}>📈 Tendencia mensual (gasto, S/)</h3>
+        <Tendencia arbol={arbolResumen} mesesSel={mesesSel} mesAbierto={mesAbierto} />
+      </div>
+
+      {/* Detalle y subdetalle */}
+      <div style={card}>
+        <h3 style={h3}>🧾 Detalle por área, grupo, subgrupo y cuenta <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#64748b' }}>· {periodo} · clic en una fila para abrir su detalle</span></h3>
+        <TablaDetalle arbol={construirArbol(filtrados, [m => m.area, m => m.grupo, m => m.subgrupo, etiquetaCuenta])} meses={mesesSel} expandirTodo={expandirTodo} />
+      </div>
+
+      {/* Principales desviaciones */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '14px' }}>
+        {[['▲ Cuentas con mayor sobregasto', topSobregasto, MAL], ['▼ Cuentas con mayor ahorro', topAhorro, OK]].map(([titulo, lista, color]) => (
+          <div key={titulo} style={card}>
+            <h3 style={{ ...h3, color }}>{titulo}</h3>
+            <table data-hoja={titulo.includes('sobregasto') ? 'Mayor sobregasto' : 'Mayor ahorro'} style={{ borderCollapse: 'collapse', width: '100%' }}>
+              <thead><tr>{['Cuenta', 'Área', 'Proyectado', 'Ejecutado', 'Variación'].map((c, i) => <th key={c} style={{ ...tdL, fontSize: '10.5px', color: '#475569', background: '#f8fafc', textAlign: i < 2 ? 'left' : 'right' }}>{c}</th>)}</tr></thead>
+              <tbody>
+                {lista.length === 0 && <tr><td colSpan={5} style={{ ...tdL, color: '#94a3b8' }}>Ninguna en el periodo.</td></tr>}
+                {lista.map(d => (
+                  <tr key={d.area + d.cuenta}>
+                    <td style={{ ...tdL, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${d.cuenta} · ${d.subgrupo}`}>{d.cuenta}</td>
+                    <td style={{ ...tdL, color: '#64748b', whiteSpace: 'nowrap' }}>{d.area}</td>
+                    <td style={{ ...tdL, textAlign: 'right' }} data-valor={d.p} data-formato="moneda">{soles(d.p)}</td>
+                    <td style={{ ...tdL, textAlign: 'right' }} data-valor={d.e} data-formato="moneda">{soles(d.e)}</td>
+                    <td style={{ ...tdL, textAlign: 'right', color, fontWeight: 700, whiteSpace: 'nowrap' }} data-valor={d.ahorro} data-formato="moneda">{soles(d.ahorro)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      {/* Detalle mensual en formato Power BI */}
+      <div style={card}>
+        <button type="button" className="btn-ghost" onClick={() => setVerMensual(!verMensual)} data-no-print>{verMensual || expandirTodo ? '▾' : '▸'} Detalle mensual (formato Power BI, gastos en negativo)</button>
+        {(verMensual || expandirTodo) && (
+          <div style={{ marginTop: '10px' }}>
+            <TablaArbol arbol={arbolAreas} mesesVisibles={mesesSel} conPeso titulo="ÁREA GASTOS" abiertoPorDefecto={1} expandirTodo={expandirTodo} />
+            <TablaArbol arbol={arbolSubgrupos} mesesVisibles={mesesSel} conPeso={false} titulo="SUBGRUPO" abiertoPorDefecto={0} expandirTodo={expandirTodo} />
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: '10.5px', color: '#64748b', lineHeight: 1.5 }}>
+        Proyectado: gastos registrados en el sistema para la versión y año. Ejecutado: asientos publicados en Odoo (cuentas de destino 9x); el mes en curso aparece marcado como «abierto» porque puede tener asientos por saldar — quítalo con «Meses cerrados».
+        Arriba los montos van como gasto (positivo): ▼ ahorro = se gastó menos de lo proyectado, ▲ sobregasto = se gastó más. Ejecución = ejecutado ÷ proyectado.
       </div>
     </div>
   );
