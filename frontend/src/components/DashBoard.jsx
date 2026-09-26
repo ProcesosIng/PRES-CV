@@ -17,7 +17,7 @@ import Offcanvas from './Offcanvas';
 import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
 import AdminUsuarios from './admin/AdminUsuarios';
 import DistribucionCalidad, { MODULO_DISTRIBUCION_CALIDAD } from './modulos/DistribucionCalidad';
-import CosteoCrisolesTablero from './modulos/CosteoCrisolesTablero';
+import CosteoProduccionTablero, { COSTEOS_TABLERO } from './modulos/CosteoProduccionTablero';
 import AdminActividad from './admin/AdminActividad';
 import ImportarExcel from './admin/ImportarExcel';
 
@@ -486,17 +486,17 @@ export default function Dashboard({
         </section>
       )}
 
-      {/* Costeo de Crisoles: pantalla completa tipo tablero (ya no ventana emergente) */}
-      {vistaActual === 'tabla' && categoriaSeleccionada === 'Costeo de Crisoles' && (
+      {/* Costeos de Crisoles y Copelas: pantalla completa tipo tablero (ya no ventana emergente) */}
+      {vistaActual === 'tabla' && COSTEOS_TABLERO[categoriaSeleccionada] && (
         <section style={{ width: '100%', padding: '20px', boxSizing: 'border-box' }}>
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
           <div style={{ marginTop: '16px' }}>
-            <CosteoCrisolesTablero idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />
+            <CosteoProduccionTablero key={categoriaSeleccionada} modulo={categoriaSeleccionada} idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />
           </div>
         </section>
       )}
 
-      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && categoriaSeleccionada !== 'Costeo de Crisoles' && (
+      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && !COSTEOS_TABLERO[categoriaSeleccionada] && (
         <section style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
 
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>

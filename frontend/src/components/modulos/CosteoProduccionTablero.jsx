@@ -5,12 +5,24 @@ import { imprimirElemento } from '../../config/impresion';
 import { exportarTablasHtml } from '../../config/excel';
 
 // =====================================================================
-// COSTEO DE CRISOLES — pantalla completa (reemplaza la ventana emergente).
-// Toma el plan del forecast (Crisoles de Arcilla), los costos registrados en los módulos
+// COSTEO DE PRODUCCIÓN (Crisoles y Copelas) — pantalla completa (reemplaza la ventana emergente).
+// Toma el plan del forecast de la unidad de negocio, los costos registrados en los módulos
 // del área con su proceso (1er, 2do, compartido/CIF) y los parámetros de planta, y calcula
 // el costo por tamaño y mes con el motor de config/costeoCrisoles.js.
 // =====================================================================
-const MODULO = 'Costeo de Crisoles';
+// Configuración de cada costeo que usa este tablero (misma lógica: 1er proceso, 2do proceso y CIF compartido).
+export const COSTEOS_TABLERO = {
+  'Costeo de Crisoles': {
+    unidad: 'Crisoles de Arcilla', clave: 'CRI', titulo: 'Costeo de Crisoles', producto: 'crisol', productos: 'crisoles', bueno: 'bueno', buenos: 'buenos',
+    bloques: { p1: '1er proceso (prensado)', p2: '2do proceso (calcinado)', comp: 'CIF compartido' },
+    capacidad: ['Crisoles por calcinación', 'Calcinaciones por mes', 'Hornos'], pesoSugerido,
+  },
+  'Costeo de Copelas': {
+    unidad: 'Copelas', clave: 'COP', titulo: 'Costeo de Copelas', producto: 'copela', productos: 'copelas', bueno: 'buena', buenos: 'buenas',
+    bloques: { p1: '1er proceso', p2: '2do proceso', comp: 'CIF compartido' },
+    capacidad: ['Copelas por horneada', 'Horneadas por mes', 'Hornos'], pesoSugerido: () => 0,
+  },
+};
 const ANIO_ACTUAL = new Date().getFullYear();
 const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 const fmt = (v, d = 2) => (Math.abs(num(v)) < 1e-9 ? '—' : num(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -18,12 +30,15 @@ const fmtQ = (v) => (Math.abs(num(v)) < 0.5 ? '—' : Math.round(num(v)).toLocal
 const slug = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 
 // El año se elige arriba; al cambiarlo se vuelve a montar el tablero con lo guardado de ese año.
-export default function CosteoCrisolesTablero(props) {
+export default function CosteoProduccionTablero(props) {
   const [anio, setAnio] = useState(String(ANIO_ACTUAL));
   return <TableroAnio key={`${props.idVersion}-${anio}`} {...props} anio={anio} setAnio={setAnio} />;
 }
 
-function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
+function TableroAnio({ idVersion, area, usuario, anio, setAnio, modulo = 'Costeo de Crisoles' }) {
+  const MODULO = modulo;
+  const CFG = COSTEOS_TABLERO[modulo];
+  const BLOQUES_UI = BLOQUES.map(b => ({ ...b, nombre: CFG.bloques[b.clave] }));
   const puedeEditar = usuario?.esAdmin || (usuario?.areasPermitidas || []).includes(area);
   const refReporte = useRef(null);
   const [recarga, setRecarga] = useState(0);
@@ -39,7 +54,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
   const demandaForecast = useMemo(() => {
     const mapa = {};
     listarForecastComercial(idVersion).forEach(f => {
-      if (f.unidad_negocio !== 'Crisoles de Arcilla' || String(f.anio_proyeccion) !== anio) return;
+      if (f.unidad_negocio !== CFG.unidad || String(f.anio_proyeccion) !== anio) return;
       // Las cantidades del forecast ya están en unidades (el precio es por crisol aunque la UM diga "Bx").
       if (!mapa[f.producto]) mapa[f.producto] = Array(12).fill(0);
       MESES_COSTEO.forEach((m, i) => { mapa[f.producto][i] += num(f.cantidades?.[m]); });
@@ -51,7 +66,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
   const [parametros, setParametros] = useState(() => ({ ...PARAMETROS_POR_DEFECTO, ...(base.parametros || {}) }));
   const [ajustes, setAjustes] = useState(() => base.ajustes_pt || {});          // { producto: { mesIdx: valor } }
   // Peso guardado o, si no hay, el sugerido del Excel según el tamaño (30/40/45/50 g).
-  const [pesos, setPesos] = useState(() => Object.fromEntries(Object.keys(demandaForecast).map(p => [p, base.pesos?.[p] || pesoSugerido(p) || ''])));
+  const [pesos, setPesos] = useState(() => Object.fromEntries(Object.keys(demandaForecast).map(p => [p, base.pesos?.[p] || CFG.pesoSugerido(p) || ''])));
   const [excluidos, setExcluidos] = useState(() => base.excluidos || []);
   const [productoGrafico, setProductoGrafico] = useState('');
 
@@ -82,14 +97,14 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
   const prodGraf = resultado.productos.find(p => p.producto === productoGrafico) || resultado.productos[0];
 
   const guardar = () => {
-    if (resultado.productos.length === 0) return alert('No hay productos de Crisoles de Arcilla en el forecast de este año.');
-    const idLote = `COSTEO-CRI-${idVersion}-${anio}`;
+    if (resultado.productos.length === 0) return alert(`No hay productos de ${CFG.unidad} en el forecast de este año.`);
+    const idLote = `COSTEO-${CFG.clave}-${idVersion}-${anio}`;
     const comunes = { parametros, ajustes_pt: ajustes, pesos, excluidos, version_costeo: 2, anio_proyeccion: anio, calculado_en: new Date().toISOString() };
     const registros = resultado.productos.map(p => {
       const forecast = listarForecastComercial(idVersion).filter(f => f.producto === p.producto && String(f.anio_proyeccion) === anio);
       const precio = forecast.length ? forecast.reduce((a, f) => a + num(f.precio_venta), 0) / forecast.length : 0;
       return {
-        id_registro: `COSTEO-CRI-${idVersion}-${anio}-${slug(p.producto)}`,
+        id_registro: `COSTEO-${CFG.clave}-${idVersion}-${anio}-${slug(p.producto)}`,
         id_lote: idLote,
         id_version: idVersion, idVersion, area, modulo: MODULO, categoria: MODULO,
         fecha_proyeccion: `${anio}-01-01`,
@@ -116,10 +131,10 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
   };
 
   const imprimir = () => imprimirElemento(refReporte.current, {
-    titulo: `Costeo de Crisoles ${anio}`,
+    titulo: `${CFG.titulo} ${anio}`,
     lineas: [`Versión ${String(idVersion).toUpperCase()}`, `Merma ${parametros.merma}% · Factor ${parametros.factorCorreccion}% · TC ${parametros.tipoCambio}`, `Impreso por ${usuario?.nombre || usuario?.email || '-'} el ${new Date().toLocaleString('es-PE')}`],
   });
-  const excel = () => exportarTablasHtml({ contenedor: refReporte.current, nombreArchivo: `Costeo Crisoles ${idVersion} ${anio}`, titulo: `Costeo de Crisoles ${anio}`, subtitulo: `Versión ${String(idVersion).toUpperCase()} · TC ${parametros.tipoCambio}` }).catch(e => alert(e.message));
+  const excel = () => exportarTablasHtml({ contenedor: refReporte.current, nombreArchivo: `${CFG.titulo} ${idVersion} ${anio}`, titulo: `${CFG.titulo} ${anio}`, subtitulo: `Versión ${String(idVersion).toUpperCase()} · TC ${parametros.tipoCambio}` }).catch(e => alert(e.message));
 
   // ---------- estilos ----------
   const card = { background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', marginBottom: '16px', boxShadow: '0 1px 2px rgba(15,23,42,0.04)' };
@@ -137,8 +152,8 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
   );
   const PARAMS = [
     ['factorCorreccion', 'Factor de corrección crudos', '%'], ['merma', 'Merma en calcinación', '%'],
-    ['capacidadCalcinacion', 'Crisoles por calcinación', 'und'], ['calcinacionesMes', 'Calcinaciones por mes', 'veces'],
-    ['hornos', 'Hornos', 'und'], ['stockInicial', 'Stock inicial PT', 'und'], ['tipoCambio', 'Tipo de cambio', 'S/ por US$'],
+    ['capacidadCalcinacion', CFG.capacidad[0], 'und'], ['calcinacionesMes', CFG.capacidad[1], 'veces'],
+    ['hornos', CFG.capacidad[2], 'und'], ['stockInicial', 'Stock inicial PT', 'und'], ['tipoCambio', 'Tipo de cambio', 'S/ por US$'],
   ];
   const maxUnit = Math.max(0.0001, ...(prodGraf?.meses || []).map(m => m.uTotal));
 
@@ -147,8 +162,8 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
       {/* Encabezado */}
       <div style={{ ...card, background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <div style={{ fontSize: '11px', letterSpacing: '.12em', opacity: .8, fontWeight: 700 }}>PRODUCCIÓN CRISOLES · VERSIÓN {String(idVersion).toUpperCase()}</div>
-          <div style={{ fontSize: '24px', fontWeight: 800 }}>Costeo de Crisoles {anio}</div>
+          <div style={{ fontSize: '11px', letterSpacing: '.12em', opacity: .8, fontWeight: 700 }}>{area.toUpperCase()} · VERSIÓN {String(idVersion).toUpperCase()}</div>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>{CFG.titulo} {anio}</div>
           <div style={{ fontSize: '12px', opacity: .85 }}>{guardados.length ? `Guardado · ${new Date(base.calculado_en || guardados[0].actualizado_en).toLocaleString('es-PE')}` : 'Aún no guardado para este año'}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -176,7 +191,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
           ))}
         </div>
         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '10px' }}>
-          Capacidad de calcinación: <b>{fmtQ(resultado.capacidadMes)}</b> crisoles/mes · Calcinados = PT ÷ (1 − merma) · Crudos = calcinados × (1 + factor) · El costo unitario se calcula sobre el PT bueno (la merma queda incluida).
+          Capacidad de calcinación: <b>{fmtQ(resultado.capacidadMes)}</b> {CFG.productos}/mes · Calcinados = PT ÷ (1 − merma) · Crudos = calcinados × (1 + factor) · El costo unitario se calcula sobre el PT bueno (la merma queda incluida).
         </div>
       </div>
 
@@ -190,16 +205,16 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
       <div ref={refReporte}>
         {/* KPIs */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-          {kpi('Crisoles a producir (PT)', fmtQ(ptTotal), `${resultado.productos.length} tamaños`, '#0ea5e9')}
+          {kpi(`${CFG.productos[0].toUpperCase()}${CFG.productos.slice(1)} a producir (PT)`, fmtQ(ptTotal), `${resultado.productos.length} tamaños`, '#0ea5e9')}
           {kpi('Costo total del año', `S/ ${fmt(costoTotal, 0)}`, `US$ ${fmt(costoTotal / tc, 0)}`, '#16a34a')}
           {kpi('Costo unitario promedio', `S/ ${fmt(ptTotal ? costoTotal / ptTotal : 0, 4)}`, `US$ ${fmt(ptTotal ? costoTotal / ptTotal / tc : 0, 4)}`, '#f59e0b')}
-          {BLOQUES.map(b => kpi(b.nombre, `S/ ${fmt(totBloque(b.clave), 0)}`, costoTotal ? `${(totBloque(b.clave) / costoTotal * 100).toFixed(1)}% del costo` : '', b.color))}
+          {BLOQUES_UI.map(b => kpi(b.nombre, `S/ ${fmt(totBloque(b.clave), 0)}`, costoTotal ? `${(totBloque(b.clave) / costoTotal * 100).toFixed(1)}% del costo` : '', b.color))}
         </div>
 
         {/* Plan de producción */}
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <h3 style={{ ...h3, margin: 0 }}>🏭 Plan de producción (crisoles buenos a entregar)</h3>
+            <h3 style={{ ...h3, margin: 0 }}>🏭 Plan de producción ({CFG.productos} {CFG.buenos} a entregar)</h3>
             {puedeEditar && (
               <div style={{ display: 'flex', gap: '6px' }} data-no-print>
                 <button type="button" className="btn-ghost" onClick={nivelar} title="Promedio mensual del forecast por tamaño">⚖️ Nivelar producción</button>
@@ -207,7 +222,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
               </div>
             )}
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Viene del forecast de Comercial (Crisoles de Arcilla); puedes ajustar cualquier mes. El peso (g) reparte la materia prima según el tamaño.</div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Viene del forecast de Comercial ({CFG.unidad}); puedes ajustar cualquier mes. El peso (g) reparte la materia prima según el tamaño.</div>
           <div style={{ overflowX: 'auto' }}>
             <table data-hoja="Plan de producción" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr>
@@ -215,7 +230,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
                 {MESES_COSTEO.map(m => <th key={m} style={th}>{m}</th>)}<th style={th}>Total</th>
               </tr></thead>
               <tbody>
-                {productosForecast.length === 0 && <tr><td colSpan={15} style={{ ...td, textAlign: 'center', color: '#94a3b8', padding: '18px' }}>No hay forecast de Crisoles de Arcilla para {anio}.</td></tr>}
+                {productosForecast.length === 0 && <tr><td colSpan={15} style={{ ...td, textAlign: 'center', color: '#94a3b8', padding: '18px' }}>No hay forecast de {CFG.unidad} para {anio}.</td></tr>}
                 {productosForecast.map(p => {
                   const activo = !excluidos.includes(p);
                   const fila = productos.find(x => x.producto === p);
@@ -257,12 +272,12 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
         {/* Costos por bloque */}
         <div style={card}>
           <h3 style={h3}>💰 Costos del área por proceso (S/)</h3>
-          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Lo registrado en los módulos de Producción Crisoles para {anio}, según el proceso de cada gasto (sin proceso: materia prima → 1er, envases/suministros → 2do, lo demás → compartido). Incluye embalaje de Logística y Calidad repartida.</div>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Lo registrado en los módulos de {area} para {anio}, según el proceso de cada gasto (sin proceso: materia prima → 1er, envases/suministros → 2do, lo demás → compartido). Incluye embalaje de Logística y Calidad repartida.</div>
           <div style={{ overflowX: 'auto' }}>
             <table data-hoja="Costos por proceso" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr><th style={{ ...th, textAlign: 'left', left: 0, zIndex: 2 }}>Concepto</th>{MESES_COSTEO.map(m => <th key={m} style={th}>{m}</th>)}<th style={th}>Total</th></tr></thead>
               <tbody>
-                {BLOQUES.map(b => {
+                {BLOQUES_UI.map(b => {
                   const filas = costos.filas.filter(f => f.bloque === b.clave);
                   const tot = costos.totales[b.clave];
                   return (
@@ -290,7 +305,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
 
         {/* Costo unitario por tamaño */}
         <div style={card}>
-          <h3 style={h3}>📊 Costo unitario por tamaño y mes (S/ por crisol bueno)</h3>
+          <h3 style={h3}>📊 Costo unitario por producto y mes (S/ por {CFG.producto} {CFG.bueno})</h3>
           <div style={{ overflowX: 'auto' }}>
             <table data-hoja="Costo unitario" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead><tr><th style={{ ...th, textAlign: 'left', left: 0, zIndex: 2 }}>Tamaño / bloque</th>{MESES_COSTEO.map(m => <th key={m} style={th}>{m}</th>)}<th style={th}>Promedio</th></tr></thead>
@@ -302,7 +317,7 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
                       {p.meses.map((m, i) => <td key={i} style={{ ...td, fontWeight: 800 }} data-valor={m.uTotal} data-formato="numero">{fmt(m.uTotal, 4)}</td>)}
                       <td style={{ ...td, fontWeight: 800, color: '#b45309' }} data-valor={p.unitarioPromedio} data-formato="numero">{fmt(p.unitarioPromedio, 4)}</td>
                     </tr>
-                    {BLOQUES.map(b => {
+                    {BLOQUES_UI.map(b => {
                       const clave = { p1: 'uP1', p2: 'uP2', comp: 'uComp' }[b.clave];
                       const anual = p[`${b.clave}Anual`];
                       return (
@@ -335,12 +350,12 @@ function TableroAnio({ idVersion, area, usuario, anio, setAnio }) {
               </select>
             </div>
             <div style={{ display: 'flex', gap: '16px', fontSize: '11px', margin: '10px 0' }}>
-              {BLOQUES.map(b => <span key={b.clave}><span style={{ display: 'inline-block', width: '10px', height: '10px', background: b.color, borderRadius: '2px', marginRight: '4px' }} />{b.nombre}</span>)}
+              {BLOQUES_UI.map(b => <span key={b.clave}><span style={{ display: 'inline-block', width: '10px', height: '10px', background: b.color, borderRadius: '2px', marginRight: '4px' }} />{b.nombre}</span>)}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '8px', alignItems: 'end', height: '200px', borderBottom: '1px solid #cbd5e1', padding: '0 4px' }}>
               {prodGraf.meses.map((m, i) => (
                 <div key={i} title={`${MESES_COSTEO[i]}: S/ ${fmt(m.uTotal, 4)}`} style={{ display: 'flex', flexDirection: 'column-reverse', height: `${(m.uTotal / maxUnit) * 100}%`, borderRadius: '4px 4px 0 0', overflow: 'hidden' }}>
-                  {BLOQUES.map(b => { const v = m[{ p1: 'uP1', p2: 'uP2', comp: 'uComp' }[b.clave]]; return <div key={b.clave} style={{ height: m.uTotal ? `${(v / m.uTotal) * 100}%` : 0, background: b.color }} />; })}
+                  {BLOQUES_UI.map(b => { const v = m[{ p1: 'uP1', p2: 'uP2', comp: 'uComp' }[b.clave]]; return <div key={b.clave} style={{ height: m.uTotal ? `${(v / m.uTotal) * 100}%` : 0, background: b.color }} />; })}
                 </div>
               ))}
             </div>
