@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import ReporteGantt, { MESES_CORTOS, mesesVacios, totalMontoGrupos } from './ReporteGantt';
 import EstadoResultados from './EstadoResultados';
+import GastosProyVsEjec from './GastosProyVsEjec';
 import { listarVersiones } from '../../data/store';
 
 // El Forecast (ventas) y los Costeos (formularios de apoyo que calculan el costo de cada
@@ -607,13 +608,13 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
         </div>
         
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {tipoReporte !== 'eerr' && (
+          {!['eerr', 'gastos_pve'].includes(tipoReporte) && (
           <button onClick={exportarAExcel} style={{ background: '#16a34a', color: 'white', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
             📥 Descargar CSV / Excel
           </button>
           )}
           
-          {tipoReporte !== 'eerr' && (
+          {!['eerr', 'gastos_pve'].includes(tipoReporte) && (
           <div style={{ background: '#dcfce7', padding: '10px 20px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'right' }}>
             <div style={{ fontSize: '11px', color: '#166534', fontWeight: 'bold' }}>
               {{ forecast: 'INGRESO PROYECTADO (US$ convertido a S/)', compras: 'COSTO DE COMPRAS', produccion: 'COSTO DE PRODUCCIÓN' }[tipoReporte] || 'TOTAL FILTRADO'}
@@ -633,6 +634,7 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
           { id: 'gastos_areas', label: '🏢 Gastos por Áreas' },
           { id: 'compras', label: '🛒 Plan de Compras' },
           { id: 'produccion', label: '⚙️ Plan de Producción' },
+          { id: 'gastos_pve', label: '💸 Gastos: Proyectado vs Ejecutado' },
           { id: 'eerr', label: '📊 Estado de Resultados' }
         ].map(tab => (
           <button
@@ -939,6 +941,10 @@ export default function ReporteGeneral({ registrosTotales = [] }) {
       )}
 
       {/* 5. REPORTE GENERAL CONSOLIDADO (CON VISTA AGRUPADA Y DETALLADA) */}
+      {tipoReporte === 'gastos_pve' && (
+        <GastosProyVsEjec registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
+      )}
+
       {tipoReporte === 'eerr' && (
         <EstadoResultados registrosTotales={registrosTotales} versiones={versionesDisponibles} idVersionFiltro={filtroVersion} />
       )}
