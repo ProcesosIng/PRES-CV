@@ -280,7 +280,7 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
         <TablaArbol arbol={arbolAreas} mesesVisibles={mesesSel} conPeso titulo="ÁREA GASTOS" abiertoPorDefecto={1} expandirTodo={expandirTodo} />
         <TablaArbol arbol={arbolSubgrupos} mesesVisibles={mesesSel} conPeso={false} titulo="SUBGRUPO" abiertoPorDefecto={0} expandirTodo={expandirTodo} />
         <div style={{ fontSize: '10px', color: '#64748b', lineHeight: 1.5 }}>
-          Proyectado: gastos registrados en el sistema para la versión y año. Ejecutado: asientos publicados en Odoo (cuentas de destino 9x).
+          Proyectado: gastos registrados en el sistema para la versión y año. Ejecutado: asientos publicados en Odoo (cuentas de destino 9x) de los meses cerrados; el mes en curso no se considera hasta su cierre.
           Gastos en negativo · Variación = Ejecutado − Proyectado (verde = se gastó menos) · %Var = Variación / Proyectado · %G = peso dentro del área.
         </div>
       </div>

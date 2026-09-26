@@ -764,6 +764,7 @@ app.get('/api/maestros/productos/historial', async (req, res) => {
 // ----------------------------------------------------
 // EJECUTADO PARA EL ESTADO DE RESULTADOS (Odoo, asientos publicados)
 // Saldo (debe - haber) por cuenta y mes de las clases 6, 7, 8 y 9 del año pedido.
+// Solo meses CERRADOS: el mes en curso aún tiene asientos por saldar y corregir, así que no entra.
 // La clasificación en líneas del EERR se hace en el frontend (config/eerr.js).
 // ----------------------------------------------------
 app.get('/api/eerr/ejecutado', async (req, res) => {
@@ -778,7 +779,8 @@ app.get('/api/eerr/ejecutado', async (req, res) => {
          JOIN public.account_move am ON am.id = aml.move_id
          JOIN public.account_account aa ON aa.id = aml.account_id
         WHERE am.state = 'posted'
-          AND aml.date >= $1::date AND aml.date < $2::date
+          AND aml.date >= $1::date
+          AND aml.date < LEAST($2::date, date_trunc('month', CURRENT_DATE)::date)
           AND (aa.code LIKE '6%' OR aa.code LIKE '7%' OR aa.code LIKE '8%' OR aa.code LIKE '9%')
         GROUP BY aa.code, EXTRACT(MONTH FROM aml.date)`,
       [`${anio}-01-01`, `${anio + 1}-01-01`]
