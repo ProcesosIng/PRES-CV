@@ -1,26 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PROCESOS_PRODUCTIVOS, MESES } from '../../config/data';
+import { prefijoDeArea, procesosDeArea, etiquetaProceso } from '../../config/areas';
+import { MESES } from '../../config/data';
 import { obtenerEmpleadosOdoo, obtenerProductosOdoo, obtenerCuentasOdoo } from '../../data/store';
 import { formatearCuentaContable } from '../../config/cuentas';
 
 const ANIO_ACTUAL = new Date().getFullYear();
 const ANIOS_DISPONIBLES = [ANIO_ACTUAL - 1, ANIO_ACTUAL, ANIO_ACTUAL + 1, ANIO_ACTUAL + 2].map(String);
 
-const prefijosPorArea = {
-  'administración': '94',
-  'administracion': '94',
-  'comercial': '95',
-  'logística': '98',
-  'logistica': '98',
-  'almacén': '99',
-  'almacen': '99',
-  'producción crisoles': '91',
-  'produccion crisoles': '91',
-  'producción fundente': '92',
-  'produccion fundente': '92',
-  'producción': '91',
-  'produccion': '91'
-};
 
 export default function UtilesOficinaForm({ registro, onGuardar, onCancelar, modo, area }) {
   const isSoloLectura = modo === 'ver';
@@ -53,7 +39,7 @@ export default function UtilesOficinaForm({ registro, onGuardar, onCancelar, mod
   const nuevoIdFila = () => `util-${Date.now()}-${contadorFilaRef.current++}`;
 
   const areaNormalizada = (area || '').toLowerCase().trim();
-  const prefijoArea = prefijosPorArea[areaNormalizada] || '95';
+  const prefijoArea = prefijoDeArea(areaNormalizada);
 
   // 1. CARGA EN VIVO DESDE ODOO
   useEffect(() => {
@@ -490,7 +476,7 @@ export default function UtilesOficinaForm({ registro, onGuardar, onCancelar, mod
                 <label style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>PROCESO</label>
                 <select value={proceso} onChange={e => setProceso(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px', background: 'white' }}>
                   <option value="">-- Seleccione --</option>
-                  {PROCESOS_PRODUCTIVOS.map((p, idxProc) => <option key={`proc-${idxProc}-${p}`} value={p}>{p}</option>)}
+                  {procesosDeArea(area).map(p => <option key={p} value={p}>{etiquetaProceso(p)}</option>)}
                 </select>
               </div>
               <div className="form-group">

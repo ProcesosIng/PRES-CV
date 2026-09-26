@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { prefijoDeArea, procesosDeArea, etiquetaProceso } from '../../config/areas';
 import { createPortal } from 'react-dom'; // 👈 1. Importamos createPortal
-import { maestroEmpleados, PROCESOS_PRODUCTIVOS, MESES } from '../../config/data';
+import { maestroEmpleados, MESES } from '../../config/data';
 import { API_URL } from '../../config/api';
 
 export default function RemuneracionesForm({ registro, onGuardar, onCancelar, modo, area }) {
@@ -32,17 +33,8 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
     asig_fam: '0', movilidad: '0', he_25: '0', he_35: '0', feriados: '0', comision: '0', tarjeta_alim: 'No', h_noc: '0', otrasRemun: '0'
   });
 
-  const prefijosPorArea = {
-      'Administración': '94',
-      'Comercial': '95',
-      'Logística': '98',
-      'Almacen': '99',
-      'Producción Crisoles': '91',
-      'Producción Fundente': '92',
-      'Producción Copelas': '93'
-    };
 
-  const prefijo = prefijosPorArea[area] || '';
+  const prefijo = prefijoDeArea(area);
 
   const [filasCuentas, setFilasCuentas] = useState([]);
 
@@ -531,7 +523,7 @@ export default function RemuneracionesForm({ registro, onGuardar, onCancelar, mo
                   style={{ width: '100%', padding: '8px', border: '1px solid var(--line, #cbd5e1)', borderRadius: '4px', background: 'white' }}
                 >
                   <option value="">-- Seleccione --</option>
-                  {PROCESOS_PRODUCTIVOS.map(p => <option key={p} value={p}>{p}</option>)}
+                  {procesosDeArea(area).map(p => <option key={p} value={p}>{etiquetaProceso(p)}</option>)}
                 </select>
               </div>
               <div className="form-group">

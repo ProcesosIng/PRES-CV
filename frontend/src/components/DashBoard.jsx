@@ -16,6 +16,7 @@ import TablaGenerica from './common/TablaGenerica';
 import Offcanvas from './Offcanvas';
 import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
 import AdminUsuarios from './admin/AdminUsuarios';
+import DistribucionCalidad, { MODULO_DISTRIBUCION_CALIDAD } from './modulos/DistribucionCalidad';
 import AdminActividad from './admin/AdminActividad';
 
 const FILAS_ESPECIFICAS = {
@@ -471,7 +472,19 @@ export default function Dashboard({
       )}
 
       {/* VISTA 3: TABLA DE PRESUPUESTOS DINÁMICA */}
-      {vistaActual === 'tabla' && (
+      {/* Distribución de Calidad: pantalla propia (porcentajes + activador), no una tabla de registros */}
+      {vistaActual === 'tabla' && categoriaSeleccionada === MODULO_DISTRIBUCION_CALIDAD && (
+        <section style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+          <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
+          <div className="page-head" style={{ marginTop: '20px' }}>
+            <div className="eyebrow">Calidad</div>
+            <h2>Distribución de gastos de Calidad</h2>
+          </div>
+          <DistribucionCalidad key={versionActiva} idVersion={versionActiva} usuario={usuario} />
+        </section>
+      )}
+
+      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && (
         <section style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
 
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>

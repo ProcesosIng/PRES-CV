@@ -63,6 +63,15 @@ export const MODULOS_CONFIG = {
     labelDetalle: 'TIPO DE SERVICIO',
     mensajeValidacion: 'Agregue al menos un servicio.'
   },
+  // Personal externo pagado con recibo por honorarios (en Fundente se carga solo a los pedidos en sachet).
+  'Personal Externo (RxH)': {
+    prefijo: 'EXT',
+    tituloModulo: 'Personal Externo (RxH)',
+    tituloSeccion2: '2. Servicio de personal externo',
+    labelDetalle: 'PERSONA / SERVICIO',
+    mensajeValidacion: 'Agregue al menos un servicio de personal externo.',
+    cuentaSugerida: '6399000 - Otros servicios prestados por terceros - Varios',
+  },
   'Otros Servicios': {
     prefijo: 'SRV',
     tituloModulo: 'Servicios',

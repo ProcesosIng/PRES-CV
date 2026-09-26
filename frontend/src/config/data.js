@@ -269,6 +269,25 @@ export const configModulos = {
       ],
     },
 
+    // Personal externo pagado con recibo por honorarios (cuenta 6399000 con el prefijo del área).
+    'Personal Externo (RxH)': {
+      icono: '🧾',
+      columnasTabla: [
+        { nombre: 'Fecha / Mes', alinear: 'left' },
+        { nombre: 'Persona / Servicio', alinear: 'left' },
+        { nombre: 'Cuenta', alinear: 'left' },
+        { nombre: 'Proceso', alinear: 'left' },
+        { nombre: 'Costo Total (S/)', alinear: 'right' },
+        { nombre: 'Acciones', alinear: 'center' }
+      ],
+    },
+
+    // Calidad: porcentajes para repartir sus gastos a Crisoles, Fundente, Copelas y Comercial.
+    'Distribución de Calidad': {
+      icono: '⚖️',
+      columnasTabla: [],
+    },
+
     // especifico
     'Remuneraciones': {
       icono: '💰',

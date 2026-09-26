@@ -28,6 +28,7 @@ const MODULOS_PRODUCCION = [
   'Materias Primas',
   'Materiales Auxiliares y Suministros',
   'Envases y Embalajes',
+  'Personal Externo (RxH)',
 ];
 
 const MODULOS_PLANIFICACION = [
@@ -63,7 +64,8 @@ export const MODULOS_POR_AREA = {
   'Almacen': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Producción Fundente': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_FUNDENTE, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Producción Copelas': [...MODULOS_PRODUCCION, ...MODULOS_COSTEO_COPELAS, ...BASE_COMUN, ...MODULOS_PLAN_COMP],
-  'Calidad': [...BASE_COMUN, ...MODULOS_PLAN_COMP],
+  // Calidad registra en la cuenta 6 base (sin prefijo) y la reparte por porcentajes (ver Distribución de Calidad).
+  'Calidad': ['Distribución de Calidad', ...BASE_COMUN, ...MODULOS_PLAN_COMP],
   'Comercial': [...BASE_COMUN, ...MODULOS_PLAN_COMP, 'Forecast de Ventas'],
 };
 

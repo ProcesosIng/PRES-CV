@@ -56,8 +56,11 @@ const usuarioDe = (req) => req.usuario.email;
 const ipDe = (req) => req.usuario?.ip || req.socket?.remoteAddress || null;
 
 // Derivado que un costeo de embalajes (Logística) deja en la cuenta de embalaje de un centro de producción.
+// También los gastos de Calidad repartidos por su Distribución a Crisoles, Fundente, Copelas y Comercial.
+const DESTINOS_CALIDAD = ['Producción Crisoles', 'Producción Fundente', 'Producción Copelas', 'Comercial'];
 const derivadoPermitido = (ctx, r) => puedeEditarArea(ctx.quien, r.area)
-  || (ctx.embalaje && String(r.area || '').startsWith('Producción') && r.modulo === 'Envases y Embalajes');
+  || (ctx.embalaje && String(r.area || '').startsWith('Producción') && r.modulo === 'Envases y Embalajes')
+  || (ctx.calidad && DESTINOS_CALIDAD.includes(r.area) && String(r.id_registro || '').startsWith('DERIV-CAL-'));
 
 // Un usuario de área solo crea, edita o elimina registros de sus áreas.
 function exigirArea(ctx, area, idRegistro) {
@@ -472,6 +475,7 @@ function crearRouterPresupuesto(pool) {
     if (principales.length === 0) throw new ErrorApi(400, 'El lote no tiene registro principal');
     principales.forEach(r => exigirArea(ctx, r.area, r.id_registro));
     ctx.embalaje = principales.every(r => r.modulo === 'Costeo de Embalajes');
+    ctx.calidad = principales.every(r => r.modulo === 'Distribución de Calidad' && r.area === 'Calidad');
     registros.filter(esDerivado).forEach(r => { if (!derivadoPermitido(ctx, r)) exigirArea(ctx, r.area, r.id_registro); });
     const filas = await conTransaccion(pool, async (cx) => {
       const versiones = new Set(registros.map(r => r.id_version || r.idVersion));

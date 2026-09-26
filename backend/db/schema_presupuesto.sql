@@ -86,7 +86,10 @@ SELECT l.id_version, v.nombre AS version_nombre, l.area, l.modulo, l.anio, l.mes
   FROM ppto_registro_lineas l
   JOIN ppto_registros r ON r.id_registro = l.id_registro AND NOT r.eliminado
   JOIN ppto_versiones v ON v.id_version = l.id_version AND NOT v.eliminado
- WHERE l.tipo_registro = 'gasto';
+ WHERE l.tipo_registro = 'gasto'
+   -- Calidad: si su gasto ya se repartió a otras áreas (DERIV-CAL-...), solo cuenta lo repartido.
+   AND NOT EXISTS (SELECT 1 FROM ppto_registros d
+                    WHERE NOT d.eliminado AND starts_with(d.id_registro, 'DERIV-CAL-' || r.id_registro || '-'));
 
 -- FORECAST DE VENTAS: una fila por registro de forecast (producto + cliente) y mes.
 -- Se regenera cada vez que se guarda el forecast. Montos en la moneda del forecast y en soles.

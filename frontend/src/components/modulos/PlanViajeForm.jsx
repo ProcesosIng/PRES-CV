@@ -1,24 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { prefijoDeArea, procesosDeArea, etiquetaProceso } from '../../config/areas';
 import { MESES } from '../../config/data';
 import { obtenerCuentasOdoo, obtenerClientesOdoo, obtenerProductosOdoo, obtenerEmpleadosOdoo } from '../../data/store';
 
-const PROCESOS_PRODUCTIVOS = ['Primer Proceso', 'Segundo Proceso', 'CIF', 'Granel', 'Sachet'];
 
-const prefijosPorArea = {
-  'administración': '94',
-  'administracion': '94',
-  'comercial': '95',
-  'logística': '98',
-  'logistica': '98',
-  'almacén': '99',
-  'almacen': '99',
-  'producción crisoles': '91',
-  'produccion crisoles': '91',
-  'producción fundente': '92',
-  'produccion fundente': '92',
-  'producción': '91',
-  'produccion': '91'
-};
 
 export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, idVersion, area }) {
   const isSoloLectura = modo === 'ver';
@@ -294,7 +279,7 @@ export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, i
     let codigoLimpio = partes[0].trim();
     
     const areaKey = (areaActual || area || '').toLowerCase().trim();
-    const prefijo = prefijosPorArea[areaKey] || '90';
+    const prefijo = prefijoDeArea(areaKey);
 
     if (codigoLimpio.length >= 9 && codigoLimpio.startsWith(prefijo)) return codigoLimpio;
     const numeroBase = codigoLimpio.length > 7 ? codigoLimpio.substring(codigoLimpio.length - 7) : codigoLimpio;
@@ -516,7 +501,7 @@ export default function PlanViajeForm({ registro, onGuardar, onCancelar, modo, i
                 <select value={datosAuto.proceso} onChange={e => setDatosAuto({ ...datosAuto, proceso: e.target.value })}
                   style={{ width: '100%', padding: '8px', border: '1px solid var(--line, #cbd5e1)', borderRadius: '4px' }}>
                   <option value="">-- Seleccione --</option>
-                  {PROCESOS_PRODUCTIVOS.map(p => <option key={p} value={p}>{p}</option>)}
+                  {procesosDeArea(datosAuto.area || area).map(p => <option key={p} value={p}>{etiquetaProceso(p)}</option>)}
                 </select>
               </div>
             </div>
