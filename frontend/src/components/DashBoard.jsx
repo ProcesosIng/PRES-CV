@@ -18,6 +18,10 @@ import CosteoEmbalajesFila from './modulos/CosteoEmbalajesTabla';
 import AdminUsuarios from './admin/AdminUsuarios';
 import DistribucionCalidad, { MODULO_DISTRIBUCION_CALIDAD } from './modulos/DistribucionCalidad';
 import CosteoProduccionTablero, { COSTEOS_TABLERO } from './modulos/CosteoProduccionTablero';
+import CosteoFundenteTablero from './modulos/CosteoFundenteTablero';
+
+// Costeos que se muestran como pantalla completa (tablero) en vez de ventana emergente.
+const esCosteoTablero = (cat) => !!COSTEOS_TABLERO[cat] || cat === 'Costeo de Fundente';
 import AdminActividad from './admin/AdminActividad';
 import ImportarExcel from './admin/ImportarExcel';
 
@@ -487,16 +491,18 @@ export default function Dashboard({
       )}
 
       {/* Costeos de Crisoles y Copelas: pantalla completa tipo tablero (ya no ventana emergente) */}
-      {vistaActual === 'tabla' && COSTEOS_TABLERO[categoriaSeleccionada] && (
+      {vistaActual === 'tabla' && esCosteoTablero(categoriaSeleccionada) && (
         <section style={{ width: '100%', padding: '20px', boxSizing: 'border-box' }}>
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
           <div style={{ marginTop: '16px' }}>
-            <CosteoProduccionTablero key={categoriaSeleccionada} modulo={categoriaSeleccionada} idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />
+            {categoriaSeleccionada === 'Costeo de Fundente'
+              ? <CosteoFundenteTablero idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />
+              : <CosteoProduccionTablero key={categoriaSeleccionada} modulo={categoriaSeleccionada} idVersion={versionActiva} area={areaSeleccionada} usuario={usuario} />}
           </div>
         </section>
       )}
 
-      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && !COSTEOS_TABLERO[categoriaSeleccionada] && (
+      {vistaActual === 'tabla' && categoriaSeleccionada !== MODULO_DISTRIBUCION_CALIDAD && !esCosteoTablero(categoriaSeleccionada) && (
         <section style={{ width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
 
           <button onClick={() => { setVistaActual('categorias'); setCategoriaSeleccionada(''); }} className="btn-back">← Volver al menú</button>
