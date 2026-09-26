@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { API_URL } from '../../config/api';
 import { obtenerCuentasOdoo } from '../../data/store';
 import { abreviarNombreCuenta } from '../../config/cuentas';
-import { movimientosProyectados, movimientosEjecutados } from '../../config/gastos';
+import { movimientosProyectados, movimientosEjecutados, clasificacionDesdeMaestro } from '../../config/gastos';
 
 // Reporte de GASTOS: Proyectado (sistema) vs Ejecutado (Odoo), como el tablero de Power BI.
 //  - Tabla 1: Área → Grupo → Subgrupo → Cuenta, con %G (peso dentro del área).
@@ -179,8 +179,10 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
 
   // Nombres de cuenta desde el maestro (para las cuentas que solo vienen con código desde Odoo)
   const [nombresCuenta, setNombresCuenta] = useState({});
+  const [clasificacionMaestro, setClasificacionMaestro] = useState({});
   useEffect(() => {
     obtenerCuentasOdoo().then(lista => {
+      setClasificacionMaestro(clasificacionDesdeMaestro(lista || []));
       const mapa = {};
       (lista || []).forEach(c => {
         const cod = String(c.codigo || c.id || '');
@@ -191,9 +193,9 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
   }, []);
 
   const movimientos = useMemo(() => [
-    ...movimientosProyectados(registrosTotales, { idVersion, anio }),
-    ...(estadoEjec === 'ok' ? movimientosEjecutados(ejecutadoOdoo) : []),
-  ], [registrosTotales, idVersion, anio, ejecutadoOdoo, estadoEjec]);
+    ...movimientosProyectados(registrosTotales, { idVersion, anio }, clasificacionMaestro),
+    ...(estadoEjec === 'ok' ? movimientosEjecutados(ejecutadoOdoo, clasificacionMaestro) : []),
+  ], [registrosTotales, idVersion, anio, ejecutadoOdoo, estadoEjec, clasificacionMaestro]);
 
   const areas = useMemo(() => [...new Set(movimientos.map(m => m.area))].sort(), [movimientos]);
   const [areasSel, setAreasSel] = useState(null); // null = todas
@@ -216,8 +218,8 @@ export default function GastosProyVsEjec({ registrosTotales = [], versiones = []
   };
 
   const filtrados = movimientos.filter(m => areasActivas.includes(m.area) && mesesSel.includes(m.mes));
-  const arbolAreas = useMemo(() => construirArbol(filtrados, [m => m.area, m => m.grupo, m => m.subgrupo, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
-  const arbolSubgrupos = useMemo(() => construirArbol(filtrados, [m => m.subgrupo, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
+  const arbolAreas = useMemo(() => construirArbol(filtrados, [m => m.area, m => m.grupo, m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
+  const arbolSubgrupos = useMemo(() => construirArbol(filtrados, [m => m.subgrupo, m => m.id, etiquetaCuenta]), [filtrados, nombrePorCodigo]);
 
   const toggle = (lista, valor) => (lista.includes(valor) ? lista.filter(v => v !== valor) : [...lista, valor]);
   const panel = { background: 'white', border: '2px solid #1e3a8a', borderRadius: '8px', marginBottom: '10px', overflow: 'hidden' };

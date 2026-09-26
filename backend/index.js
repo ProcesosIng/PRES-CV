@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 require('dotenv').config();
 const { crearRouterPresupuesto, inicializarEsquemaPresupuesto } = require('./presupuesto');
+const { asegurarClasificacionCuentas } = require('./clasificacionCuentas');
 
 const app = express();
 // CORS_ORIGIN (separado por comas) limita qué dominios pueden llamar a la API; sin definir, se permite todo (desarrollo).
@@ -511,6 +512,10 @@ async function sincronizarMaestros() {
     }
     
 
+    // Las cuentas nuevas que llegan de Odoo reciben la clasificación del Excel si existe (sin pisar las manuales)
+    const clasif = await asegurarClasificacionCuentas(dbLocal);
+    if (clasif.actualizadas) console.log(`✅ Clasificación de reportes asignada a ${clasif.actualizadas} cuentas nuevas`);
+
     console.log('✅ ¡Sincronización masiva completada con éxito en la base de datos local!');
     return true;
   } catch (error) {
@@ -828,6 +833,13 @@ app.listen(PORT, async () => {
   } catch (err) {
     console.error('❌ No se pudieron crear las tablas de presupuesto:', err.message);
   }
+
+  try {
+    const r = await asegurarClasificacionCuentas(dbLocal);
+    console.log(r.omitido ? `ℹ️ Clasificación de cuentas: ${r.omitido}` : `✅ Clasificación de cuentas para reportes: ${r.actualizadas} cuentas completadas desde el Excel`);
+  } catch (err) {
+    console.error('❌ No se pudo preparar la clasificación de cuentas:', err.message);
+  }
   
   console.log('✨ Servidor listo. La sincronización se hará de forma manual desde el sistema.');
 });
@@ -912,16 +924,25 @@ app.put('/api/maestros/empleados/:id', async (req, res) => {
 app.put('/api/maestros/cuentas/:id', async (req, res) => {
   const { id } = req.params;
   const { nombre, categoria, subcategoria, grupo } = req.body;
+  // Clasificación para reportes: si el campo viene en la petición se guarda tal cual (vacío = sin clasificar)
+  const enviado = (k) => Object.prototype.hasOwnProperty.call(req.body, k);
+  const limpio = (v) => (String(v ?? '').trim() || null);
   try {
     const r = await dbLocal.query(
       `UPDATE maestros_cuentas_local
        SET nombre = COALESCE($1, nombre),
            categoria = COALESCE($2, categoria),
            grupo = COALESCE($3, grupo),
+           id_reporte = CASE WHEN $5 THEN $6 ELSE id_reporte END,
+           grupo_reporte = CASE WHEN $7 THEN $8 ELSE grupo_reporte END,
+           subgrupo_reporte = CASE WHEN $9 THEN $10 ELSE subgrupo_reporte END,
            actualizado_at = CURRENT_TIMESTAMP
        WHERE codigo = $4 OR id_odoo::text = $4
        RETURNING *;`,
-      [nombre ?? null, categoria ?? null, subcategoria ?? grupo ?? null, id]
+      [nombre ?? null, categoria ?? null, subcategoria ?? grupo ?? null, id,
+       enviado('id_reporte'), limpio(req.body.id_reporte),
+       enviado('grupo_reporte'), limpio(req.body.grupo_reporte),
+       enviado('subgrupo_reporte'), limpio(req.body.subgrupo_reporte)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Cuenta no encontrada' });
     res.json({ mensaje: 'Cuenta actualizada correctamente', cuenta: r.rows[0] });
